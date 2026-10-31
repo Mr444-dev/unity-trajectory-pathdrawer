@@ -1,0 +1,23 @@
+{
+  "name": "OmniTwin.PathDrawer.EditModeTests",
+  "rootNamespace": "OmniTwin.PathDrawer.Tests",
+  "references": [
+    "OmniTwin.PathDrawer.Runtime",
+    "Unity.Collections",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

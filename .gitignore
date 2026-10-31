@@ -21,7 +21,7 @@
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
-# Unity AI Assistant stores editor-local checkpoint preferences here.
+# Retain editor-local package preferences without publishing them.
 /ProjectSettings/Packages/com.unity.ai.assistant/Settings.json
 *.log
 

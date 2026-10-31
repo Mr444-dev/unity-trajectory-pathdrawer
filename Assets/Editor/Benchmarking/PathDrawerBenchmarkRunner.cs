@@ -22,6 +22,11 @@ namespace OmniTwin.PathDrawer.Editor
         [MenuItem("PathDrawer/Benchmarks/Run 100, 500, 2,000 points")]
         public static void Run()
         {
+            RunAndExport();
+        }
+
+        public static string RunAndExport()
+        {
             var results = new BenchmarkResult[3];
             results[0] = MeasureSize(100);
             results[1] = MeasureSize(500);
@@ -46,6 +51,7 @@ namespace OmniTwin.PathDrawer.Editor
             File.WriteAllText(path, markdown.ToString());
             Debug.Log($"PathDrawer benchmark written to {path}\n{markdown}");
             if (!Application.isBatchMode) EditorUtility.RevealInFinder(path);
+            return markdown.ToString();
         }
 
         private static BenchmarkResult MeasureSize(int pointCount)
@@ -63,11 +69,12 @@ namespace OmniTwin.PathDrawer.Editor
             var rdpTimings = new long[Iterations];
             var geometryTimings = new long[Iterations];
             var ribbonTimings = new long[Iterations];
+            NativeArray<float3> writableSource = source;
 
             for (int i = 0; i < pointCount; i++)
             {
                 float t = i * 0.045f;
-                source[i] = new float3(i * 0.22f, math.sin(t) * 0.5f, math.cos(t * 0.63f) * 0.8f);
+                writableSource[i] = new float3(i * 0.22f, math.sin(t) * 0.5f, math.cos(t * 0.63f) * 0.8f);
             }
 
             int simplifiedCount = 0;

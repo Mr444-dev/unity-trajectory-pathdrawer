@@ -17,7 +17,9 @@ flowchart LR
 | **01 Path input** | [`PathInputDecimator.cs`](Assets/PathDrawer/Runtime/Input/PathInputDecimator.cs) | Preallocated pointer samples, distance/turn hysteresis, iterative RDP simplification |
 | **02 Path geometry** | [`CentripetalCatmullRomResampler.cs`](Assets/PathDrawer/Runtime/Geometry/CentripetalCatmullRomResampler.cs) | Burst spline and ballistic lookup generation, arc-length table, uniform-distance output, travel evaluation |
 | **03 Line Renderer** | [`PathRenderAdapter.cs`](Assets/PathDrawer/Runtime/Rendering/PathRenderAdapter.cs), [`BurstRibbonMeshBuilder.cs`](Assets/PathDrawer/Runtime/Rendering/BurstRibbonMeshBuilder.cs) | NativeArray LineRenderer submission or Burst ribbon mesh with miter/bevel joins and continuous UVs |
-| **04 Trajectory view** | [`TrajectoryPhysicsValidator.cs`](Assets/PathDrawer/Runtime/Physics/TrajectoryPhysicsValidator.cs) | Batched terrain projection, swept blocker queries, first-impact data, reachable-distance evaluation |
+| **04 Trajectory view** | [`TrajectoryPhysicsValidator.cs`](Assets/PathDrawer/Runtime/Validation/TrajectoryPhysicsValidator.cs) | Batched terrain projection, swept blocker queries, first-impact data, reachable-distance evaluation |
+
+The demo composition is [`PathDrawerDemoController.cs`](Assets/Scripts/PathDrawer/Runtime/PathDrawerDemoController.cs). It captures mouse or touch input, schedules geometry and batched physics work without waiting in the frame loop, and updates the LineRenderer and ribbon when the results are ready.
 
 ## Runtime flow
 
@@ -77,9 +79,9 @@ All native buffers are allocated by `TrajectoryGeometryBuffer` at construction. 
 
 Physics is deliberately staged because casts need to follow the terrain-projected path:
 
-1. `ScheduleValidation(geometry, count)` schedules vertical `RaycastCommand` projection after the geometry handle.
-2. `ScheduleBlockerCasts()` completes projection, adjusts hit samples by `surfaceOffset`, rebuilds projected arc distances/tangents, then schedules one `SpherecastCommand` per segment.
-3. `CompleteValidation()` reads the first blocker and records the contact center, surface hit point, segment index, collider, and reachable distance.
+1. `ScheduleValidation(geometry, count)` schedules vertical `RaycastCommand` projection after the geometry handle. Ballistic mode can disable terrain projection while keeping the blocker sweep.
+2. `TryCompleteValidation()` polls the projection handle, adjusts hit samples by `surfaceOffset`, rebuilds projected arc distances/tangents, then schedules one `SpherecastCommand` per segment. It returns without waiting while each batch runs.
+3. A later poll records the first blocker and exposes the contact center, surface hit point, segment index, collider, and reachable distance. `CompleteValidation()` remains available for synchronous callers.
 
 Use a terrain-only projection layer mask and a separate obstacle mask. This keeps the swept volume from reporting the terrain directly beneath the path as an obstacle. `EvaluateAtDistance` clamps travel at the first impact; `EvaluateAtNormalizedDistance` maps `[0,1]` onto the reachable distance. The LineRenderer adapter can split the path exactly at `ImpactCenter`.
 
@@ -145,7 +147,7 @@ Treat the owners as long-lived objects and dispose them in reverse order when th
 
 ## Tests and benchmarks
 
-The requested geometry checks live in [`PathDrawerGeometryTests.cs`](Assets/Tests/EditMode/PathDrawerGeometryTests.cs). NUnit EditMode entry points live under Unity's built-in Editor test assembly at [`PathDrawerGeometryEditModeTests.cs`](Assets/Editor/PathDrawerGeometryEditModeTests.cs). This keeps the project free of assembly definition files while retaining discoverable EditMode tests.
+The runtime systems compile in [`OmniTwin.PathDrawer.Runtime.asmdef`](Assets/PathDrawer/Runtime/OmniTwin.PathDrawer.Runtime.asmdef). NUnit EditMode tests, including the 500-iteration end-to-end allocation probe, live in [`PathDrawerGeometryTests.cs`](Assets/Tests/EditMode/PathDrawerGeometryTests.cs) and the Editor-only [`OmniTwin.PathDrawer.EditModeTests.asmdef`](Assets/Tests/EditMode/OmniTwin.PathDrawer.EditModeTests.asmdef).
 
 Run **Window → General → Test Runner → EditMode → Run All**. Coverage includes:
 
@@ -153,10 +155,16 @@ Run **Window → General → Test Runner → EditMode → Run All**. Coverage in
 - Exact Catmull–Rom control interpolation and no cusp/reversal around acute turns.
 - `<1e-3 m` Euclidean output spacing on highly uneven controls at a `0.20 m` step.
 - `GC.GetAllocatedBytesForCurrentThread()` across 1,000 warmed geometry rebuilds.
+- `GC.GetAllocatedBytesForCurrentThread()` across 500 warmed input + geometry + writable-MeshData ribbon frame-loop iterations.
 
-The benchmark menu is **PathDrawer → Benchmarks → Run 100, 500, 2,000 points**. It warms Burst, runs 30 measured rebuilds per size, and exports `PathDrawer-Benchmark-Results.md` in the project root. The table reports median microseconds for RDP, spline + arc-length resampling, and ribbon build separately, plus end-to-end median and P95. Timed work includes writable MeshData creation, the Burst ribbon job, and mesh application.
+The demo scene and portfolio benchmark have dedicated Editor GUI commands under **Tools → PathDrawer**:
 
-The workspace compiled once in Unity 6000.6.3f1 during implementation. The final adapter and native-count guard changes were not recompiled, and the benchmark was not run during this pass, so no timing numbers are claimed here. Run the menu item on the target machine to capture the reproducible baseline. See [IMPLEMENTATION_AUDIT_PL.md](IMPLEMENTATION_AUDIT_PL.md) for the implementation and verification record.
+1. **1. Build & Save Ready-to-Play SampleScene** creates and wires the uneven terrain, obstacle layer and pillars, camera, renderers, ribbon material, controller, EventSystem, and mode buttons in `Assets/Scenes/SampleScene.unity`.
+2. **2. Run Benchmark Sweep & Export Markdown** warms Burst, runs 30 measured samples for 100, 500, and 2,000 points, writes `PathDrawer-Benchmark-Results.md`, and replaces the README table with the measured median and P95 values from that machine.
+
+The existing **PathDrawer → Benchmarks → Run 100, 500, 2,000 points** command remains available for exporting the standalone results file. Benchmarks report the processor type and Unity version. The table below contains placeholders until the Editor benchmark command has been run on the target machine; no synthetic timings are published.
+
+The EditMode tests and Editor scene/benchmark commands are intended to run in the Unity 6000.6.3f1 GUI. This checkout's new editor workflows have not been executed in the Editor yet, so the sample scene and benchmark measurements must be generated there before claiming a verified build or performance baseline. See [IMPLEMENTATION_AUDIT_PL.md](IMPLEMENTATION_AUDIT_PL.md) for the existing implementation and audit record.
 
 | Input points | RDP points | Output points | RDP median (µs) | Spline + LUT median (µs) | Ribbon median (µs) | Total median (µs) | Total P95 (µs) |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -171,3 +179,11 @@ The workspace compiled once in Unity 6000.6.3f1 during implementation. The final
 - `PathRenderAdapter` reserves one extra native display slot for exact impact insertion; its constructor argument remains the maximum trajectory point count.
 - Physics query arrays are fixed at construction. Over-capacity inputs fail at the API boundary rather than resize on a hot path.
 - Profile Mono GC allocation, job waits, MeshData allocation/application, and GPU upload separately; a zero managed allocation result does not imply zero native or GPU work.
+
+## GitHub Actions
+
+The `Unity EditMode Tests` workflow runs the EditMode suite with Unity `6000.6.3f1` using GameCI. Add the activated Unity Personal license file as a repository Actions secret named `UNITY_LICENSE` before the workflow can run. GitHub supplies the workflow token automatically. Local GUI test runs do not require this CI secret.
+
+## License
+
+PathDrawer is released under the MIT License; see [LICENSE](LICENSE).

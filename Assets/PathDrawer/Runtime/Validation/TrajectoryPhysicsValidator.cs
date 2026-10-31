@@ -1,4 +1,6 @@
 using System;
+using OmniTwin.PathDrawer.Geometry;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -35,6 +37,7 @@ namespace OmniTwin.PathDrawer.Physics
         private Collider _firstBlocker;
         private bool _projectionPending;
         private bool _blockerPending;
+        private bool _projectToTerrain;
 
         public TrajectoryPhysicsValidator(
             int maxPoints,
@@ -81,9 +84,21 @@ namespace OmniTwin.PathDrawer.Physics
         public Collider FirstBlocker => _firstBlocker;
         public NativeArray<float> PathDistances => _pathDistances;
         public NativeArray<float3> PathTangents => _pathTangents;
+        public bool IsProjectionComplete => !_projectionPending || _projectionHandle.IsCompleted;
+        public bool IsBlockerBatchComplete => !_blockerPending || _blockerHandle.IsCompleted;
 
         /// <summary>Schedules vertical terrain raycasts after the geometry job has finished.</summary>
         public JobHandle ScheduleValidation(TrajectoryGeometryBuffer geometry, int pointCount, JobHandle dependency = default)
+        {
+            return ScheduleValidation(geometry, pointCount, projectToTerrain: true, dependency);
+        }
+
+        /// <summary>Schedules optional terrain projection followed by obstacle checks without changing ballistic height.</summary>
+        public JobHandle ScheduleValidation(
+            TrajectoryGeometryBuffer geometry,
+            int pointCount,
+            bool projectToTerrain,
+            JobHandle dependency = default)
         {
             CompletePending();
             if (geometry == null) throw new ArgumentNullException(nameof(geometry));
@@ -92,28 +107,58 @@ namespace OmniTwin.PathDrawer.Physics
 
             _pathPositions = geometry.Positions;
             _pointCount = pointCount;
+            _projectToTerrain = projectToTerrain;
             _firstBlockedSegment = -1;
             _firstBlocker = null;
             _totalLength = 0f;
             _reachableDistance = 0f;
-            JobHandle buildCommands = new BuildProjectionCommandsJob
+            if (!projectToTerrain)
             {
-                Positions = _pathPositions,
-                Commands = _projectionCommands,
-                PointCount = pointCount,
-                Up = _projectionUp,
-                CastHeight = _projectionHeight,
-                CastDistance = _projectionHeight + _maximumDrop,
-                Query = _projectionQuery
-            }.Schedule(JobHandle.CombineDependencies(geometry.PendingHandle, dependency));
-            _projectionHandle = RaycastCommand.ScheduleBatch(
-                _projectionCommands.GetSubArray(0, pointCount),
-                _projectionHits.GetSubArray(0, pointCount),
-                _minimumCommandsPerJob,
-                1,
-                buildCommands);
+                _projectionHandle = JobHandle.CombineDependencies(geometry.PendingHandle, dependency);
+            }
+            else
+            {
+                JobHandle buildCommands = new BuildProjectionCommandsJob
+                {
+                    Positions = _pathPositions,
+                    Commands = _projectionCommands,
+                    PointCount = pointCount,
+                    Up = _projectionUp,
+                    CastHeight = _projectionHeight,
+                    CastDistance = _projectionHeight + _maximumDrop,
+                    Query = _projectionQuery
+                }.Schedule(JobHandle.CombineDependencies(geometry.PendingHandle, dependency));
+                _projectionHandle = RaycastCommand.ScheduleBatch(
+                    _projectionCommands.GetSubArray(0, pointCount),
+                    _projectionHits.GetSubArray(0, pointCount),
+                    _minimumCommandsPerJob,
+                    1,
+                    buildCommands);
+            }
             _projectionPending = true;
             return _projectionHandle;
+        }
+
+        /// <summary>
+        /// Non-blockingly advances projection and blocker batches. Returns true only when all results are ready.
+        /// The first successful poll after projection schedules blocker casts; poll again on a later frame.
+        /// </summary>
+        public bool TryCompleteValidation()
+        {
+            if (_projectionPending)
+            {
+                if (!_projectionHandle.IsCompleted) return false;
+                _projectionHandle.Complete();
+                ApplyProjectionAndMeasurePath();
+                _projectionPending = false;
+                ScheduleBlockerBatch();
+                return false;
+            }
+
+            if (!_blockerPending) return false;
+            if (!_blockerHandle.IsCompleted) return false;
+            CompleteBlockerResults();
+            return true;
         }
 
         /// <summary>Completes terrain projection, then schedules swept sphere casts along each projected segment.</summary>
@@ -122,6 +167,13 @@ namespace OmniTwin.PathDrawer.Physics
             if (!_projectionPending) throw new InvalidOperationException("Call ScheduleValidation before scheduling blocker casts.");
             _projectionHandle.Complete();
             ApplyProjectionAndMeasurePath();
+
+            _projectionPending = false;
+            return ScheduleBlockerBatch();
+        }
+
+        private JobHandle ScheduleBlockerBatch()
+        {
 
             for (int i = 0; i < _pointCount - 1; i++)
             {
@@ -142,7 +194,6 @@ namespace OmniTwin.PathDrawer.Physics
                 _minimumCommandsPerJob,
                 1,
                 default);
-            _projectionPending = false;
             _blockerPending = true;
             return _blockerHandle;
         }
@@ -154,6 +205,11 @@ namespace OmniTwin.PathDrawer.Physics
             if (!_blockerPending) return;
             _blockerHandle.Complete();
 
+            CompleteBlockerResults();
+        }
+
+        private void CompleteBlockerResults()
+        {
             _firstBlockedSegment = -1;
             _firstBlocker = null;
             _reachableDistance = _totalLength;
@@ -211,9 +267,12 @@ namespace OmniTwin.PathDrawer.Physics
         {
             for (int i = 0; i < _pointCount; i++)
             {
-                RaycastHit hit = _projectionHits[i];
-                if (hit.collider != null)
-                    _pathPositions[i] = (float3)hit.point + (float3)hit.normal * _surfaceOffset;
+                if (_projectToTerrain)
+                {
+                    RaycastHit hit = _projectionHits[i];
+                    if (hit.collider != null)
+                        _pathPositions[i] = (float3)hit.point + (float3)hit.normal * _surfaceOffset;
+                }
             }
 
             _pathDistances[0] = 0f;
@@ -249,7 +308,7 @@ namespace OmniTwin.PathDrawer.Physics
             for (int i = 0; i < PointCount; i++)
             {
                 Vector3 origin = (Vector3)(Positions[i] + Up * CastHeight);
-                Commands[i] = new RaycastCommand(origin, (Vector3)-Up, Query, CastDistance);
+                Commands[i] = new RaycastCommand(origin, (Vector3)(-Up), Query, CastDistance);
             }
         }
     }
