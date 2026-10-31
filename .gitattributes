@@ -135,6 +135,9 @@ Packages/packages-lock.json linguist-generated
 *.tiff                  lfs
 *.webp                  lfs
 
+# This small template icon is stored as an image blob in the initial commit.
+Assets/TutorialInfo/Icons/URP.png -filter -diff -merge -lfs -text
+
 # Compressed Archive
 *.7z                    lfs
 *.bz2                   lfs

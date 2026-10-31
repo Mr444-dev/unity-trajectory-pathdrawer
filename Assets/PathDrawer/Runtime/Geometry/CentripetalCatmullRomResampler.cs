@@ -104,8 +104,10 @@ namespace OmniTwin.PathDrawer.Geometry
         {
             Complete();
             if (outputSpacing <= 0f) throw new ArgumentOutOfRangeException(nameof(outputSpacing));
-            int lookupCount = settings.LookupSegments + 1;
-            if (lookupCount > _lookupPositions.Length) throw new ArgumentException("The lookup buffer is too small for this ballistic sampling rate.");
+            long requestedLookupCount = (long)settings.LookupSegments + 1L;
+            if (requestedLookupCount > _lookupPositions.Length)
+                throw new ArgumentException("The lookup buffer is too small for this ballistic sampling rate.");
+            int lookupCount = (int)requestedLookupCount;
 
             JobHandle lookup = new BallisticLookupJob
             {
@@ -144,7 +146,10 @@ namespace OmniTwin.PathDrawer.Geometry
             out float3 position,
             out float3 tangent)
         {
-            if (count <= 0)
+            if (count <= 0 ||
+                count > positions.Length ||
+                count > sampleDistances.Length ||
+                count > tangents.Length)
             {
                 position = float3.zero;
                 tangent = new float3(0f, 0f, 1f);
@@ -336,9 +341,14 @@ namespace OmniTwin.PathDrawer.Geometry
         public void Execute()
         {
             OutputCount[0] = 0;
+            TotalLength[0] = 0f;
+            if (LookupCount <= 0 ||
+                LookupCount > LookupPositions.Length ||
+                LookupCount > CumulativeLengths.Length)
+                return;
+
             float pathLength = CumulativeLengths[LookupCount - 1];
             TotalLength[0] = pathLength;
-            if (LookupCount <= 0) return;
 
             int count = 1;
             OutputPositions[0] = LookupPositions[0];

@@ -18,5 +18,11 @@ namespace OmniTwin.PathDrawer.EditorTests
 
         [Test]
         public void RebuildsAllocateNoManagedMemoryAfterWarmup() => PathDrawerGeometryTestCases.RebuildsAllocateNoManagedMemoryAfterWarmup();
+
+        [Test]
+        public void BallisticLookupCountOverflowIsRejectedBeforeScheduling() => PathDrawerGeometryTestCases.BallisticLookupCountOverflowIsRejectedBeforeScheduling();
+
+        [Test]
+        public void DistanceEvaluationRejectsCountsBeyondAnyNativeBuffer() => PathDrawerGeometryTestCases.DistanceEvaluationRejectsCountsBeyondAnyNativeBuffer();
     }
 }

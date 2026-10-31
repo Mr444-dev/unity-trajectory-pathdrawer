@@ -85,6 +85,50 @@ namespace OmniTwin.PathDrawer.Tests
             Require(allocated == 0, $"Steady-state path rebuilds allocated {allocated} managed bytes.");
         }
 
+        public static void BallisticLookupCountOverflowIsRejectedBeforeScheduling()
+        {
+            using var geometry = new TrajectoryGeometryBuffer(128, 32, Allocator.TempJob);
+            var settings = new BallisticTrajectorySettings(
+                float3.zero,
+                new float3(0f, 0f, 10f),
+                new float3(0f, -9.81f, 0f),
+                drag: 0f,
+                duration: 2f,
+                lookupSegments: int.MaxValue);
+
+            bool rejected = false;
+            try
+            {
+                geometry.RebuildBallistic(settings, 0.2f);
+            }
+            catch (ArgumentException)
+            {
+                rejected = true;
+            }
+
+            Require(rejected, "An overflowing ballistic lookup count must be rejected before a job is scheduled.");
+        }
+
+        public static void DistanceEvaluationRejectsCountsBeyondAnyNativeBuffer()
+        {
+            using var shortPositions = new NativeArray<float3>(2, Allocator.Temp);
+            using var fullPositions = new NativeArray<float3>(3, Allocator.Temp);
+            using var shortDistances = new NativeArray<float>(2, Allocator.Temp);
+            using var fullDistances = new NativeArray<float>(3, Allocator.Temp);
+            using var shortTangents = new NativeArray<float3>(2, Allocator.Temp);
+            using var fullTangents = new NativeArray<float3>(3, Allocator.Temp);
+
+            Require(!CentripetalCatmullRomResampler.EvaluateAtDistance(
+                    shortPositions, fullDistances, fullTangents, 3, 0.5f, out _, out _),
+                "Evaluation must reject a count larger than the positions buffer.");
+            Require(!CentripetalCatmullRomResampler.EvaluateAtDistance(
+                    fullPositions, shortDistances, fullTangents, 3, 0.5f, out _, out _),
+                "Evaluation must reject a count larger than the distances buffer.");
+            Require(!CentripetalCatmullRomResampler.EvaluateAtDistance(
+                    fullPositions, fullDistances, shortTangents, 3, 0.5f, out _, out _),
+                "Evaluation must reject a count larger than the tangents buffer.");
+        }
+
         private static NativeArray<float3> CreateUnevenControls()
         {
             var points = new NativeArray<float3>(7, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);

@@ -69,7 +69,7 @@ All native buffers are allocated by `TrajectoryGeometryBuffer` at construction. 
 
 ### 03 — Rendering backends
 
-**LineRenderer.** `PathRenderAdapter` reinterprets the native `float3` buffer as `Vector3` and calls Unity's `SetPositions(NativeSlice<Vector3>)` overload. A second renderer can show the blocked remainder in a different material/color. The adapter owns a fixed-capacity display buffer so it can insert the exact impact center without per-update array creation. Reserve one extra display slot beyond the maximum trajectory point count.
+**LineRenderer.** `PathRenderAdapter` reinterprets the native `float3` buffer as `Vector3` and calls Unity's `SetPositions(NativeArray<Vector3>)` overload for the reachable path. A second renderer can show the blocked remainder through a `NativeSlice<Vector3>`. The adapter owns a fixed-capacity display buffer and reserves one extra native slot to insert the exact impact center without per-update array creation.
 
 **Procedural ribbon.** `BurstRibbonMeshBuilder` allocates writable `MeshData`, writes a sequential position/normal/tangent/UV layout and 32-bit indices in a Burst job, then applies the result. The mesh uses incoming and outgoing edge pairs at each path point. Miter joins share a clamped bisector offset; bevel joins keep the two edge offsets and fill the corner wedge. U coordinates follow cumulative path distance divided by `uvMetersPerTile`, so scrolling arrows remain continuous across vertices.
 
@@ -106,10 +106,13 @@ using OmniTwin.PathDrawer.Physics;
 using OmniTwin.PathDrawer.Rendering;
 using Unity.Collections;
 using Unity.Mathematics;
+using UnityEngine;
 
 // Create owners once, with capacities chosen for your product limits.
 var input = new PathInputDecimator(capacity: 2048, minimumDistance: 0.04f);
 var geometry = new TrajectoryGeometryBuffer(maxLookupSamples: 32769, maxOutputPoints: 4096);
+var simplifiedControls = new NativeArray<float3>(2048, Allocator.Persistent);
+var mesh = new Mesh { name = "Trajectory Ribbon" };
 var physics = new TrajectoryPhysicsValidator(
     maxPoints: 4096,
     projectionLayerMask: terrainMask,
@@ -128,6 +131,14 @@ physics.ScheduleValidation(geometry, geometry.Count);
 physics.ScheduleBlockerCasts(); // can be deferred while other work executes
 physics.CompleteValidation();
 ribbon.Build(mesh, geometry.Positions, physics.PathDistances, geometry.Count, width: 0.3f);
+
+// At the owning component's teardown boundary:
+ribbon.Dispose();
+physics.Dispose();
+geometry.Dispose();
+input.Dispose();
+simplifiedControls.Dispose();
+Object.Destroy(mesh);
 ```
 
 Treat the owners as long-lived objects and dispose them in reverse order when the path system shuts down. `PathInputDecimator.Samples` and the geometry result properties are native views; they do not transfer ownership.
@@ -145,18 +156,18 @@ Run **Window → General → Test Runner → EditMode → Run All**. Coverage in
 
 The benchmark menu is **PathDrawer → Benchmarks → Run 100, 500, 2,000 points**. It warms Burst, runs 30 measured rebuilds per size, and exports `PathDrawer-Benchmark-Results.md` in the project root. The table reports median microseconds for RDP, spline + arc-length resampling, and ribbon build separately, plus end-to-end median and P95. Timed work includes writable MeshData creation, the Burst ribbon job, and mesh application.
 
-The editor used for this authoring pass is not installed in the workspace, so no local execution numbers are claimed here. Run the menu item on the target Unity editor and machine to create the reproducible baseline:
+The workspace compiled once in Unity 6000.6.3f1 during implementation. The final adapter and native-count guard changes were not recompiled, and the benchmark was not run during this pass, so no timing numbers are claimed here. Run the menu item on the target machine to capture the reproducible baseline. See [IMPLEMENTATION_AUDIT_PL.md](IMPLEMENTATION_AUDIT_PL.md) for the implementation and verification record.
 
 | Input points | RDP points | Output points | RDP median (µs) | Spline + LUT median (µs) | Ribbon median (µs) | Total median (µs) | Total P95 (µs) |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 100 | Run locally | Run locally | Run locally | Run locally | Run locally | Run locally | Run locally |
-| 500 | Run locally | Run locally | Run locally | Run locally | Run locally | Run locally | Run locally |
-| 2,000 | Run locally | Run locally | Run locally | Run locally | Run locally | Run locally | Run locally |
+| 100 | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded |
+| 500 | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded |
+| 2,000 | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded |
 
 ## Capacity and profiling notes
 
 - A spline with `N` controls and `S` lookup samples per segment requires at least `(N - 1) × S + 1` lookup entries.
 - The ribbon emits `5 × pointCount` vertices and `6 × (pointCount - 1) + 6 × max(0, pointCount - 2)` indices.
-- `PathRenderAdapter` requires room for `maximumPointCount + 1` because the exact impact sample is inserted into the display buffer.
+- `PathRenderAdapter` reserves one extra native display slot for exact impact insertion; its constructor argument remains the maximum trajectory point count.
 - Physics query arrays are fixed at construction. Over-capacity inputs fail at the API boundary rather than resize on a hot path.
 - Profile Mono GC allocation, job waits, MeshData allocation/application, and GPU upload separately; a zero managed allocation result does not imply zero native or GPU work.

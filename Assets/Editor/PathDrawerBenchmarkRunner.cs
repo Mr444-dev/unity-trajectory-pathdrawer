@@ -45,7 +45,7 @@ namespace OmniTwin.PathDrawer.Editor
             string path = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "PathDrawer-Benchmark-Results.md"));
             File.WriteAllText(path, markdown.ToString());
             Debug.Log($"PathDrawer benchmark written to {path}\n{markdown}");
-            EditorUtility.RevealInFinder(path);
+            if (!Application.isBatchMode) EditorUtility.RevealInFinder(path);
         }
 
         private static BenchmarkResult MeasureSize(int pointCount)

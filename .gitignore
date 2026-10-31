@@ -21,6 +21,8 @@
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
+# Unity AI Assistant stores editor-local checkpoint preferences here.
+/ProjectSettings/Packages/com.unity.ai.assistant/Settings.json
 *.log
 
 # By default unity supports Blender asset imports, *.blend1 blender files do not need to be commited to version control.
