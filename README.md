@@ -187,7 +187,7 @@ Latest GUI verification: Unity **6000.6.3f1**, **7/7 EditMode tests passed**, in
 
 ## GitHub Actions
 
-The `Unity EditMode Tests` workflow runs the EditMode suite with Unity `6000.6.3f1` using GameCI. Add the activated Unity Personal license file as a repository Actions secret named `UNITY_LICENSE` before the workflow can run. GitHub supplies the workflow token automatically. Local GUI test runs do not require this CI secret.
+The workflow validates project metadata on every push and pull request. Its Unity `6000.6.3f1` EditMode job uses GameCI when the activated Unity license file is configured as the repository Actions secret `UNITY_LICENSE`; without that secret, the test step is visibly skipped and GitHub Actions reports a notice. Local GUI test runs do not require this CI secret.
 
 ## License
 

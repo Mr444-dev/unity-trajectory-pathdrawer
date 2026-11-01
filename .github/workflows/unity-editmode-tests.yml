@@ -12,17 +12,58 @@ permissions:
   checks: write
 
 jobs:
-  editmode-tests:
-    name: Unity 6000.6.3f1 EditMode
+  repository-contract:
+    name: Repository contract checks
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Validate Unity project metadata
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path.cwd()
+          manifest = json.loads((root / "Packages/manifest.json").read_text())
+          assert "com.unity.ai.assistant" not in manifest["dependencies"], "Prerelease AI Assistant package must not be present"
+
+          required = [
+              "Assets/Scripts/PathDrawer/Runtime/PathDrawerDemoController.cs",
+              "Assets/Tests/EditMode/PathDrawerGeometryTests.cs",
+              "Assets/Editor/PathDrawerPortfolioTools.cs",
+              "Assets/Scenes/SampleScene.unity",
+              "LICENSE",
+          ]
+          missing = [path for path in required if not (root / path).is_file()]
+          assert not missing, f"Required PathDrawer files are missing: {missing}"
+          assert not (root / "Assets/Editor/HubForceResolve.cs").exists(), "Obsolete HubForceResolve editor script must remain absent"
+
+          for path in (root / "Assets").rglob("*.asmdef"):
+              json.loads(path.read_text())
+
+          print("Repository metadata and required PathDrawer files are valid.")
+          PY
+
+  editmode-tests:
+    name: Unity 6000.6.3f1 EditMode
+    runs-on: ubuntu-latest
+    needs: repository-contract
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Report skipped EditMode tests when no license is configured
+        if: env.UNITY_LICENSE == ''
+        run: echo "::notice title=Unity EditMode tests skipped::Add the activated Unity license file as the repository Actions secret UNITY_LICENSE to run GameCI EditMode tests."
+
       - name: Run EditMode tests
+        if: env.UNITY_LICENSE != ''
         uses: game-ci/unity-test-runner@v4.4.0
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
           projectPath: .
           unityVersion: 6000.6.3f1

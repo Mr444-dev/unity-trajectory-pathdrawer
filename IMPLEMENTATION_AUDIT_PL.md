@@ -64,7 +64,7 @@ Menu `Tools > PathDrawer > 3. Capture 1080p Portfolio Screenshot` uruchomiło sc
 
 - Po `Assets > Reimport All` Unity odbudowało cache i ponownie otworzyło właściwy projekt. Podczas odtwarzania cache wystąpiły przejściowe błędy importu edytora Input System oraz błąd kompilacji `CS1503` w edytorowym hooku zrzutu ekranu. Hook zmieniono na wyszukanie obiektu sceny o ustalonej nazwie; po `Assets > Refresh` skrypty skompilowały się, błędy importu Input System zniknęły po zakończeniu importu, a testy EditMode ponownie przeszły 7/7.
 - Podczas importu pakietu URP pojawił się komunikat edytora: `Host type is not matching any asset type` dla `Packages/com.unity.render-pipelines.core/Editor/Lighting/ProbeVolume/RenderingLayerMask/TraceRenderingLayerMask.urtshader`. To zasób pakietu URP, a renderowanie sceny, kompilacja skryptów i testy działały. Nie znaleziono potwierdzonej poprawki w repozytorium; dlatego nie deklaruję czystego logu Unity na każdej maszynie.
-- Testy i benchmark wykonano z GUI Unity. Nie uruchomiono builda standalone ani workflow GitHub Actions w tym przebiegu.
+- Testy i benchmark wykonano z GUI Unity. Push `7fd32ec` uruchomił GitHub Actions, ale GameCI nie mógł aktywować Unity, ponieważ sekret `UNITY_LICENSE` nie jest skonfigurowany. Workflow zaktualizowano, by zawsze sprawdzał metadane projektu i jawnie pomijał testy EditMode bez licencji; nowy wynik CI należy oceniać po kolejnym pushu. Nie uruchomiono builda standalone.
 - Automatyzacja potwierdziła wejście klawiatury i reakcję na kliknięcie, ale nie sprawdziła ciągłego gestu myszy przez wiele klatek.
 - `0 B` dotyczy zarządzanej alokacji w zakresie testu po rozgrzaniu. Writable `MeshData`, pamięć natywna, synchronizacja jobów i upload GPU są osobnymi kosztami.
 
