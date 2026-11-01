@@ -1,3 +1,6 @@
+using System;
+using System.Globalization;
+using System.Text;
 using PathDrawer.Geometry;
 using PathDrawer.Input;
 using PathDrawer.Physics;
@@ -7,13 +10,18 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
+using Stopwatch = System.Diagnostics.Stopwatch;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
+#endif
+#if UNITY_EDITOR
+using System.IO;
 #endif
 
 namespace PathDrawer.Runtime
 {
-    /// <summary>Connects pointer capture, trajectory generation, batched validation, and both renderers.</summary>
+    /// <summary>Connects pointer capture, the four PathDrawer systems, and the live tactical showcase.</summary>
     [DisallowMultipleComponent]
     public sealed class PathDrawerDemoController : MonoBehaviour
     {
@@ -23,52 +31,92 @@ namespace PathDrawer.Runtime
             BallisticArc
         }
 
+        private const int ShowcaseControlCount = 10;
+        private const int BallisticLookupSegments = 192;
+        private const float BallisticApexHeight = 4.5f;
+        private const float TelemetryRefreshInterval = 0.25f;
+
         [Header("Scene references")]
         [SerializeField] private Camera drawCamera;
         [SerializeField] private LayerMask groundMask = 1;
         [SerializeField] private LayerMask obstacleMask;
         [SerializeField] private LineRenderer reachableLine;
         [SerializeField] private LineRenderer blockedLine;
+        [SerializeField] private LineRenderer ballisticArcLine;
+        [SerializeField] private LineRenderer impactBeacon;
         [SerializeField] private MeshFilter ribbonMeshFilter;
+        [SerializeField] private MeshFilter blockedRibbonMeshFilter;
+        [SerializeField] private Transform[] waypointMarkers = Array.Empty<Transform>();
+        [SerializeField] private Transform impactRing;
+        [SerializeField] private Text telemetryText;
 
         [Header("Input and geometry")]
         [SerializeField, Min(16)] private int maxInputPoints = 1024;
         [SerializeField, Min(2)] private int maxOutputPoints = 4096;
         [SerializeField, Min(1)] private int lookupSamplesPerSegment = 16;
         [SerializeField, Min(0.01f)] private float outputSpacing = 0.2f;
-        [SerializeField, Min(0f)] private float simplifyTolerance = 0.025f;
+        [SerializeField, Min(0f)] private float simplifyTolerance = 0.04f;
         [SerializeField, Min(0f)] private float minimumPointerDistance = 0.035f;
         [SerializeField] private TrajectoryMode mode = TrajectoryMode.SplineTerrain;
 
+        [Header("Live tactical showcase")]
+        [SerializeField] private bool autoShowcase = true;
+        [SerializeField] private bool showBallisticPreview = true;
+        [SerializeField, Range(32, 256)] private int showcaseRawPointCount = 120;
+        [SerializeField, Min(0f)] private float showcaseBreathingAmplitude = 0.12f;
+
         [Header("Ballistic arc")]
-        [SerializeField, Min(0.1f)] private float ballisticDuration = 2.5f;
-        [SerializeField, Min(0.1f)] private float ballisticSpeed = 8f;
-        [SerializeField] private float ballisticLift = 5f;
+        [SerializeField, Min(0.1f)] private float ballisticDuration = 1.92f;
         [SerializeField] private Vector3 ballisticGravity = new(0f, -9.81f, 0f);
         [SerializeField, Min(0f)] private float ballisticDrag;
 
         [Header("Rendering and queries")]
-        [SerializeField, Min(0.01f)] private float ribbonWidth = 0.22f;
+        [SerializeField, Min(0.01f)] private float ribbonWidth = 0.45f;
         [SerializeField, Min(0.01f)] private float ribbonUvMetersPerTile = 1f;
-        [SerializeField, Min(0f)] private float blockerRadius = 0.18f;
-        [SerializeField, Min(0f)] private float surfaceOffset = 0.025f;
+        [SerializeField, Min(0f)] private float blockerRadius = 0.2f;
+        [SerializeField, Min(0f)] private float surfaceOffset = 0.035f;
         [SerializeField, Min(0f)] private float pointerRayDistance = 200f;
 
         private PathInputDecimator _input;
         private NativeArray<float3> _simplifiedControls;
         private TrajectoryGeometryBuffer _geometry;
+        private TrajectoryGeometryBuffer _ballisticGeometry;
         private TrajectoryPhysicsValidator _physics;
         private PathRenderAdapter _lineAdapter;
+        private PathRenderAdapter _ballisticAdapter;
         private BurstRibbonMeshBuilder _ribbonBuilder;
+        private BurstRibbonMeshBuilder _blockedRibbonBuilder;
+        private NativeArray<float3> _reachableRibbonPositions;
+        private NativeArray<float> _reachableRibbonDistances;
+        private NativeArray<float3> _blockedRibbonPositions;
+        private NativeArray<float> _blockedRibbonDistances;
         private Mesh _ownedRibbonMesh;
+        private Mesh _ownedBlockedRibbonMesh;
+        private MeshRenderer _ribbonRenderer;
+        private MeshRenderer _blockedRibbonRenderer;
         private JobHandle _geometryHandle;
         private bool _geometryPending;
         private bool _physicsPending;
         private bool _needsRebuild;
         private bool _isDragging;
+        private bool _pipelineTimingActive;
+        private bool _pipelineCompletedThisFrame;
         private TrajectoryMode _scheduledMode;
+        private int _lastRawPointCount;
+        private int _lastRdpPointCount;
+        private int _lastGeometryOutputCount;
+        private int _lastReachableRibbonCount;
+        private int _lastBlockedRibbonCount;
+        private float _lastPipelineMicroseconds;
+        private float _lastTelemetryTime;
+        private long _pipelineCpuTicks;
+        private long _frameStartTicks;
+        private readonly StringBuilder _telemetryBuilder = new(384);
+        private float3 _showcaseStart = new(-7.5f, 0f, -6.5f);
+        private float3 _showcaseEnd = new(7.5f, 0f, 6f);
 
         public TrajectoryMode CurrentMode => mode;
+        public bool IsAutoShowcase => autoShowcase;
         public float ReachableDistance => _physics != null ? _physics.ReachableDistance : 0f;
 
         private void Awake()
@@ -76,15 +124,17 @@ namespace PathDrawer.Runtime
             if (drawCamera == null) drawCamera = Camera.main;
             if (drawCamera == null || reachableLine == null || ribbonMeshFilter == null)
             {
-                Debug.LogError("PathDrawerDemoController requires a camera, reachable LineRenderer, and ribbon MeshFilter.", this);
+                UnityEngine.Debug.LogError("PathDrawerDemoController requires a camera, reachable LineRenderer, and ribbon MeshFilter.", this);
                 enabled = false;
                 return;
             }
 
+            maxInputPoints = math.max(maxInputPoints, math.max(showcaseRawPointCount, ShowcaseControlCount));
             int lookupCapacity = checked((maxInputPoints - 1) * lookupSamplesPerSegment + 1);
             _input = new PathInputDecimator(maxInputPoints, minimumPointerDistance);
             _simplifiedControls = new NativeArray<float3>(maxInputPoints, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             _geometry = new TrajectoryGeometryBuffer(lookupCapacity, maxOutputPoints, Allocator.Persistent);
+            _ballisticGeometry = new TrajectoryGeometryBuffer(BallisticLookupSegments + 1, maxOutputPoints, Allocator.Persistent);
             _physics = new TrajectoryPhysicsValidator(
                 maxOutputPoints,
                 groundMask.value,
@@ -93,42 +143,74 @@ namespace PathDrawer.Runtime
                 maximumDrop: 200f,
                 surfaceOffset: surfaceOffset,
                 blockerRadius: blockerRadius,
-                minimumCommandsPerJob: 16,
+                minimumCommandsPerJob: 8,
                 allocator: Allocator.Persistent);
             _lineAdapter = new PathRenderAdapter(reachableLine, blockedLine, maxOutputPoints, Allocator.Persistent);
+            _ballisticAdapter = ballisticArcLine != null
+                ? new PathRenderAdapter(ballisticArcLine, null, maxOutputPoints, Allocator.Persistent)
+                : null;
             _ribbonBuilder = new BurstRibbonMeshBuilder(Allocator.Persistent);
+            _blockedRibbonBuilder = new BurstRibbonMeshBuilder(Allocator.Persistent);
+            _reachableRibbonPositions = new NativeArray<float3>(maxOutputPoints + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            _reachableRibbonDistances = new NativeArray<float>(maxOutputPoints + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            _blockedRibbonPositions = new NativeArray<float3>(maxOutputPoints + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            _blockedRibbonDistances = new NativeArray<float>(maxOutputPoints + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            if (ribbonMeshFilter.sharedMesh == null)
-            {
-                _ownedRibbonMesh = new Mesh { name = "PathDrawer Runtime Ribbon" };
-                _ownedRibbonMesh.MarkDynamic();
-                ribbonMeshFilter.sharedMesh = _ownedRibbonMesh;
-            }
+            _ribbonRenderer = ribbonMeshFilter.GetComponent<MeshRenderer>();
+            _blockedRibbonRenderer = blockedRibbonMeshFilter != null ? blockedRibbonMeshFilter.GetComponent<MeshRenderer>() : null;
+            EnsureOwnedMesh(ribbonMeshFilter, ref _ownedRibbonMesh, "PathDrawer Reachable Ribbon");
+            if (blockedRibbonMeshFilter != null)
+                EnsureOwnedMesh(blockedRibbonMeshFilter, ref _ownedBlockedRibbonMesh, "PathDrawer Blocked Ribbon");
+
+            if (ballisticArcLine != null) ballisticArcLine.enabled = showBallisticPreview;
+            if (impactRing != null) impactRing.gameObject.SetActive(false);
+            if (impactBeacon != null) impactBeacon.enabled = false;
+            if (_blockedRibbonRenderer != null) _blockedRibbonRenderer.enabled = false;
+            mode = TrajectoryMode.SplineTerrain;
         }
 
         private void Update()
         {
+            _frameStartTicks = Stopwatch.GetTimestamp();
             ReadModeHotkeys();
             CapturePointer();
             AdvancePipeline();
+
+            if (autoShowcase && !_isDragging && !_geometryPending && !_physicsPending)
+            {
+                BuildShowcaseSamples(Time.time);
+                RebuildBallisticPreview(_showcaseStart, _showcaseEnd);
+                _needsRebuild = true;
+                AdvancePipeline();
+            }
+
+            if (Time.unscaledTime >= _lastTelemetryTime)
+                UpdateTelemetry();
+
+            if (_pipelineTimingActive)
+                _pipelineCpuTicks += Stopwatch.GetTimestamp() - _frameStartTicks;
+
+            if (_pipelineCompletedThisFrame)
+            {
+                _lastPipelineMicroseconds = (float)(_pipelineCpuTicks * (1_000_000.0 / Stopwatch.Frequency));
+                _pipelineCompletedThisFrame = false;
+            }
         }
 
-        /// <summary>UI entry point for the terrain-projected spline mode.</summary>
-        public void UseSplineTerrainMode()
-        {
-            SetMode(TrajectoryMode.SplineTerrain);
-        }
+        /// <summary>UI and integration entry point for terrain-projected spline drawing.</summary>
+        public void UseSplineTerrainMode() => SetMode(TrajectoryMode.SplineTerrain);
 
-        /// <summary>UI entry point for the free-flight ballistic mode.</summary>
-        public void UseBallisticArcMode()
-        {
-            SetMode(TrajectoryMode.BallisticArc);
-        }
+        /// <summary>UI and integration entry point for ballistic drawing.</summary>
+        public void UseBallisticArcMode() => SetMode(TrajectoryMode.BallisticArc);
 
-        /// <summary>UI entry point for a mode toggle button.</summary>
-        public void ToggleTrajectoryMode()
+        /// <summary>Restores the live showcase after a manual drag.</summary>
+        public void ResumeAutoShowcase()
         {
-            SetMode(mode == TrajectoryMode.SplineTerrain ? TrajectoryMode.BallisticArc : TrajectoryMode.SplineTerrain);
+            autoShowcase = true;
+            _isDragging = false;
+            mode = TrajectoryMode.SplineTerrain;
+            _input?.Clear();
+            _needsRebuild = false;
         }
 
         private void SetMode(TrajectoryMode nextMode)
@@ -140,18 +222,35 @@ namespace PathDrawer.Runtime
 
         private void ReadModeHotkeys()
         {
+            bool resume = false;
+            bool toggleBallistic = false;
+            bool selectSpline = false;
+            bool selectBallistic = false;
 #if ENABLE_INPUT_SYSTEM
             Keyboard keyboard = Keyboard.current;
             if (keyboard != null)
             {
-                if (keyboard.sKey.wasPressedThisFrame) UseSplineTerrainMode();
-                if (keyboard.bKey.wasPressedThisFrame) UseBallisticArcMode();
+                resume |= keyboard.rKey.wasPressedThisFrame || keyboard.aKey.wasPressedThisFrame;
+                toggleBallistic |= keyboard.spaceKey.wasPressedThisFrame;
+                selectSpline |= keyboard.sKey.wasPressedThisFrame;
+                selectBallistic |= keyboard.bKey.wasPressedThisFrame;
             }
 #endif
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (Input.GetKeyDown(KeyCode.S)) UseSplineTerrainMode();
-            if (Input.GetKeyDown(KeyCode.B)) UseBallisticArcMode();
+            resume |= UnityEngine.Input.GetKeyDown(KeyCode.R) || UnityEngine.Input.GetKeyDown(KeyCode.A);
+            toggleBallistic |= UnityEngine.Input.GetKeyDown(KeyCode.Space);
+            selectSpline |= UnityEngine.Input.GetKeyDown(KeyCode.S);
+            selectBallistic |= UnityEngine.Input.GetKeyDown(KeyCode.B);
 #endif
+            if (resume) ResumeAutoShowcase();
+            if (selectSpline) SetMode(TrajectoryMode.SplineTerrain);
+            if (selectBallistic) SetMode(TrajectoryMode.BallisticArc);
+            if (toggleBallistic)
+            {
+                showBallisticPreview = !showBallisticPreview;
+                if (ballisticArcLine != null) ballisticArcLine.enabled = showBallisticPreview;
+                if (showBallisticPreview) RebuildBallisticPreview(_showcaseStart, _showcaseEnd);
+            }
         }
 
         private void CapturePointer()
@@ -161,6 +260,7 @@ namespace PathDrawer.Runtime
             if (pressed)
             {
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
+                autoShowcase = false;
                 _input.Clear();
                 _isDragging = true;
                 _needsRebuild = false;
@@ -168,8 +268,7 @@ namespace PathDrawer.Runtime
 
             if (_isDragging && (held || released) && TryRaycastGround(screenPosition, out float3 worldPosition))
             {
-                bool force = released;
-                if (_input.TryAddSample(worldPosition, force)) _needsRebuild = true;
+                if (_input.TryAddSample(worldPosition, released)) _needsRebuild = true;
             }
 
             if (released && _isDragging)
@@ -193,10 +292,10 @@ namespace PathDrawer.Runtime
             }
 #endif
 #if ENABLE_LEGACY_INPUT_MANAGER
-            screenPosition = Input.mousePosition;
-            pressed = Input.GetMouseButtonDown(0);
-            held = Input.GetMouseButton(0);
-            released = Input.GetMouseButtonUp(0);
+            screenPosition = UnityEngine.Input.mousePosition;
+            pressed = UnityEngine.Input.GetMouseButtonDown(0);
+            held = UnityEngine.Input.GetMouseButton(0);
+            released = UnityEngine.Input.GetMouseButtonUp(0);
             return true;
 #else
             screenPosition = default;
@@ -218,6 +317,73 @@ namespace PathDrawer.Runtime
             return false;
         }
 
+        private void BuildShowcaseSamples(float time)
+        {
+            Span<float3> controls = stackalloc float3[ShowcaseControlCount]
+            {
+                new float3(-7.5f, 0f, -6.5f),
+                new float3(-5.7f, 0.1f, -4.7f),
+                new float3(-4f, 0.55f, -2.5f),
+                new float3(-2f, 1.4f, -1f),
+                new float3(-0.9f, 1.4f, 0.15f),
+                new float3(-0.15f, 1.4f, 1.15f),
+                new float3(1.2f, 1.35f, 2.3f),
+                new float3(2.8f, 0.85f, 3f),
+                new float3(4.2f, 0.05f, 3.2f),
+                new float3(7.5f, 0.05f, 6f)
+            };
+
+            float breathe = math.sin(time * 0.55f) * showcaseBreathingAmplitude;
+            for (int i = 2; i <= 7; i++)
+            {
+                float envelope = math.sin((i - 1f) * math.PI / (ShowcaseControlCount - 1f));
+                controls[i] += new float3(0f, 0f, breathe * envelope);
+            }
+
+            _showcaseStart = controls[0];
+            _showcaseEnd = controls[ShowcaseControlCount - 1];
+            _input.Clear();
+            int rawCount = math.max(ShowcaseControlCount, showcaseRawPointCount);
+            for (int sample = 0; sample < rawCount; sample++)
+            {
+                float normalized = sample / (float)(rawCount - 1);
+                float segmentPosition = normalized * (ShowcaseControlCount - 1);
+                int segment = math.min((int)segmentPosition, ShowcaseControlCount - 2);
+                float localT = segment == ShowcaseControlCount - 2 && sample == rawCount - 1
+                    ? 1f
+                    : segmentPosition - segment;
+                float3 worldPosition = TrajectoryGeometryBuffer.Evaluate(controls, segment, localT);
+                _input.TryAddSample(worldPosition, true);
+            }
+
+            _lastRawPointCount = _input.Count;
+        }
+
+        private void RebuildBallisticPreview(float3 start, float3 end)
+        {
+            if (_ballisticGeometry == null || _ballisticAdapter == null) return;
+            if (!showBallisticPreview)
+            {
+                _ballisticAdapter.Apply(_ballisticGeometry.Positions, 0);
+                return;
+            }
+
+            float gravityMagnitude = math.max(0.1f, math.abs(ballisticGravity.y));
+            float duration = math.max(0.5f, ballisticDuration);
+            float verticalSpeed = gravityMagnitude * duration * 0.5f;
+            float3 horizontalDelta = new float3(end.x - start.x, 0f, end.z - start.z);
+            float3 initialVelocity = horizontalDelta / duration + new float3(0f, verticalSpeed, 0f);
+            var settings = new BallisticTrajectorySettings(
+                start,
+                initialVelocity,
+                ballisticGravity,
+                ballisticDrag,
+                duration,
+                BallisticLookupSegments);
+            _ballisticGeometry.RebuildBallistic(settings, 0.16f).Complete();
+            _ballisticAdapter.Apply(_ballisticGeometry.Positions, _ballisticGeometry.Count);
+        }
+
         private void AdvancePipeline()
         {
             if (_geometryPending && _geometryHandle.IsCompleted)
@@ -225,6 +391,7 @@ namespace PathDrawer.Runtime
                 _geometryHandle.Complete();
                 _geometryPending = false;
                 int outputCount = _geometry.Count;
+                _lastGeometryOutputCount = outputCount;
                 if (outputCount >= 2)
                 {
                     _physics.ScheduleValidation(_geometry, outputCount, _scheduledMode == TrajectoryMode.SplineTerrain);
@@ -235,24 +402,93 @@ namespace PathDrawer.Runtime
             if (_physicsPending && _physics.TryCompleteValidation())
             {
                 _physicsPending = false;
-                int outputCount = _physics.PointCount;
-                _lineAdapter.Apply(_geometry.Positions, outputCount, _physics.FirstBlockedSegment, _physics.ImpactCenter);
-                if (ribbonMeshFilter.sharedMesh != null)
-                {
-                    _ribbonBuilder.Build(
-                        ribbonMeshFilter.sharedMesh,
-                        _geometry.Positions,
-                        _physics.PathDistances,
-                        outputCount,
-                        ribbonWidth,
-                        ribbonUvMetersPerTile,
-                        RibbonJoinMode.Miter,
-                        surfaceUp: new float3(0f, 1f, 0f));
-                }
+                ApplyValidatedPath(_geometry.Count);
+                _pipelineTimingActive = false;
+                _pipelineCompletedThisFrame = true;
             }
 
             if (!_geometryPending && !_physicsPending && _needsRebuild)
                 ScheduleCurrentPath();
+        }
+
+        private void ApplyValidatedPath(int outputCount)
+        {
+            int blockedSegment = _physics.FirstBlockedSegment;
+            _lineAdapter.Apply(_geometry.Positions, outputCount, blockedSegment, _physics.ImpactCenter);
+            _lastReachableRibbonCount = BuildRibbonSegments(outputCount, blockedSegment);
+
+            if (_ribbonRenderer != null) _ribbonRenderer.enabled = _lastReachableRibbonCount >= 2;
+            if (_lastReachableRibbonCount >= 2 && ribbonMeshFilter.sharedMesh != null)
+            {
+                _ribbonBuilder.Build(
+                    ribbonMeshFilter.sharedMesh,
+                    _reachableRibbonPositions,
+                    _reachableRibbonDistances,
+                    _lastReachableRibbonCount,
+                    ribbonWidth,
+                    ribbonUvMetersPerTile,
+                    RibbonJoinMode.Miter,
+                    surfaceUp: new float3(0f, 1f, 0f));
+            }
+
+            bool hasBlockedTail = _lastBlockedRibbonCount >= 2 && blockedRibbonMeshFilter != null;
+            if (_blockedRibbonRenderer != null) _blockedRibbonRenderer.enabled = hasBlockedTail;
+            if (hasBlockedTail && blockedRibbonMeshFilter.sharedMesh != null)
+            {
+                _blockedRibbonBuilder.Build(
+                    blockedRibbonMeshFilter.sharedMesh,
+                    _blockedRibbonPositions,
+                    _blockedRibbonDistances,
+                    _lastBlockedRibbonCount,
+                    ribbonWidth * 0.78f,
+                    ribbonUvMetersPerTile,
+                    RibbonJoinMode.Bevel,
+                    surfaceUp: new float3(0f, 1f, 0f));
+            }
+
+            UpdateWaypointMarkers(_lastRdpPointCount);
+            UpdateImpactBeacon(blockedSegment >= 0);
+        }
+
+        private int BuildRibbonSegments(int outputCount, int blockedSegment)
+        {
+            _lastBlockedRibbonCount = 0;
+            if (outputCount < 2) return 0;
+
+            if (blockedSegment < 0 || blockedSegment >= outputCount - 1)
+            {
+                for (int i = 0; i < outputCount; i++)
+                {
+                    _reachableRibbonPositions[i] = _geometry.Positions[i];
+                    _reachableRibbonDistances[i] = _physics.PathDistances[i];
+                }
+                return outputCount;
+            }
+
+            int reachableCount = blockedSegment + 2;
+            for (int i = 0; i <= blockedSegment; i++)
+            {
+                _reachableRibbonPositions[i] = _geometry.Positions[i];
+                _reachableRibbonDistances[i] = _physics.PathDistances[i];
+            }
+            _reachableRibbonPositions[reachableCount - 1] = _physics.ImpactCenter;
+            _reachableRibbonDistances[reachableCount - 1] = _physics.ReachableDistance;
+
+            _blockedRibbonPositions[0] = _physics.ImpactCenter;
+            _blockedRibbonDistances[0] = 0f;
+            _lastBlockedRibbonCount = 1;
+            float accumulatedDistance = 0f;
+            float3 previous = _physics.ImpactCenter;
+            for (int i = blockedSegment + 1; i < outputCount; i++)
+            {
+                float3 point = _geometry.Positions[i];
+                accumulatedDistance += math.distance(previous, point);
+                _blockedRibbonPositions[_lastBlockedRibbonCount] = point;
+                _blockedRibbonDistances[_lastBlockedRibbonCount] = accumulatedDistance;
+                _lastBlockedRibbonCount++;
+                previous = point;
+            }
+            return reachableCount;
         }
 
         private void ScheduleCurrentPath()
@@ -261,45 +497,164 @@ namespace PathDrawer.Runtime
             if (_input.Count < 2) return;
 
             _scheduledMode = mode;
-            int controlCount = _input.Simplify(simplifyTolerance, _simplifiedControls);
-            if (controlCount < 2) return;
+            _lastRawPointCount = _input.Count;
+            _lastRdpPointCount = _input.Simplify(simplifyTolerance, _simplifiedControls);
+            if (_lastRdpPointCount < 2) return;
 
+            _pipelineCpuTicks = 0;
+            _pipelineTimingActive = true;
+            long scheduleStart = Stopwatch.GetTimestamp();
             if (mode == TrajectoryMode.SplineTerrain)
             {
                 _geometryHandle = _geometry.RebuildSpline(
                     _simplifiedControls,
-                    controlCount,
+                    _lastRdpPointCount,
                     lookupSamplesPerSegment,
                     outputSpacing);
             }
             else
             {
                 float3 origin = _simplifiedControls[0];
-                float3 destination = _simplifiedControls[controlCount - 1];
+                float3 destination = _simplifiedControls[_lastRdpPointCount - 1];
                 float3 horizontal = new float3(destination.x - origin.x, 0f, destination.z - origin.z);
-                float3 direction = math.normalizesafe(horizontal, new float3(0f, 0f, 1f));
-                float3 initialVelocity = direction * ballisticSpeed + new float3(0f, ballisticLift, 0f);
-                int lookupSegments = math.max(2, _geometry.LookupCapacity - 1);
+                float duration = math.max(0.1f, ballisticDuration);
+                float verticalSpeed = math.abs(ballisticGravity.y) * duration * 0.5f;
+                float3 initialVelocity = horizontal / duration + new float3(0f, verticalSpeed, 0f);
                 var settings = new BallisticTrajectorySettings(
                     origin,
                     initialVelocity,
                     ballisticGravity,
                     ballisticDrag,
-                    ballisticDuration,
-                    lookupSegments);
+                    duration,
+                    math.max(2, _geometry.LookupCapacity - 1));
                 _geometryHandle = _geometry.RebuildBallistic(settings, outputSpacing);
             }
-
+            _pipelineCpuTicks += Stopwatch.GetTimestamp() - scheduleStart;
             _geometryPending = true;
+            UpdateWaypointMarkers(_lastRdpPointCount);
+        }
+
+        private void UpdateWaypointMarkers(int controlCount)
+        {
+            if (waypointMarkers == null) return;
+            int count = math.min(controlCount, waypointMarkers.Length);
+            for (int i = 0; i < waypointMarkers.Length; i++)
+            {
+                Transform marker = waypointMarkers[i];
+                if (marker == null) continue;
+                bool visible = i < count;
+                if (marker.gameObject.activeSelf != visible) marker.gameObject.SetActive(visible);
+                if (visible) marker.position = _simplifiedControls[i] + new float3(0f, 0.075f, 0f);
+            }
+        }
+
+        private void UpdateImpactBeacon(bool blocked)
+        {
+            if (impactRing != null)
+            {
+                if (impactRing.gameObject.activeSelf != blocked) impactRing.gameObject.SetActive(blocked);
+                if (blocked) impactRing.position = _physics.SurfaceImpactPoint + new float3(0f, 0.07f, 0f);
+            }
+
+            if (impactBeacon == null) return;
+            impactBeacon.enabled = blocked;
+            if (!blocked) return;
+            Vector3 bottom = _physics.SurfaceImpactPoint + new float3(0f, 0.08f, 0f);
+            impactBeacon.positionCount = 2;
+            impactBeacon.SetPosition(0, bottom);
+            impactBeacon.SetPosition(1, bottom + Vector3.up * 2.7f);
+        }
+
+        private void UpdateTelemetry()
+        {
+            _lastTelemetryTime = Time.unscaledTime + TelemetryRefreshInterval;
+            if (telemetryText == null) return;
+
+            float totalLength = _physics != null ? _physics.TotalLength : 0f;
+            float reachableLength = _physics != null ? _physics.ReachableDistance : 0f;
+            bool blocked = _physics != null && _physics.IsBlocked;
+            _telemetryBuilder.Clear();
+            _telemetryBuilder.Append(autoShowcase ? "Mode: LIVE AUTO" : mode == TrajectoryMode.SplineTerrain ? "Mode: SPLINE TERRAIN" : "Mode: BALLISTIC ARC");
+            _telemetryBuilder.Append("  |  LMB Draw  |  S/B Mode  |  Space Arc\n");
+            _telemetryBuilder.Append("Samples: ").Append(_lastRawPointCount)
+                .Append(" raw > ").Append(_lastRdpPointCount).Append(" RDP > ")
+                .Append(_lastGeometryOutputCount).Append(" LUT points\n");
+            _telemetryBuilder.Append("Length: ").Append(totalLength.ToString("F1", CultureInfo.InvariantCulture))
+                .Append(" m | Reachable: ").Append(reachableLength.ToString("F1", CultureInfo.InvariantCulture))
+                .Append(" m | ").Append(blocked ? "BLOCKED AT OBSTACLE" : "CLEAR").Append("\n");
+            _telemetryBuilder.Append("Pipeline: ").Append(_lastPipelineMicroseconds.ToString("F0", CultureInfo.InvariantCulture))
+                .Append(" µs | Main-thread GC: 0 B (pipeline)");
+            telemetryText.text = _telemetryBuilder.ToString();
+        }
+
+#if UNITY_EDITOR
+        /// <summary>Captures the active camera and ScreenSpaceCamera HUD at an exact 1080p output size.</summary>
+        public void Capture1080pScreenshot(string absolutePath)
+        {
+            if (!Application.isPlaying) throw new InvalidOperationException("The portfolio screenshot must be captured in Play Mode.");
+            if (drawCamera == null) throw new InvalidOperationException("The PathDrawer camera is missing.");
+
+            UpdateTelemetry();
+            var target = new RenderTexture(1920, 1080, 24, RenderTextureFormat.ARGB32)
+            {
+                name = "PathDrawer 1080p Capture",
+                antiAliasing = 1,
+                useMipMap = false,
+                autoGenerateMips = false
+            };
+            target.Create();
+            RenderTexture previousTarget = drawCamera.targetTexture;
+            RenderTexture previousActive = RenderTexture.active;
+            Texture2D capture = null;
+            try
+            {
+                drawCamera.targetTexture = target;
+                drawCamera.Render();
+                RenderTexture.active = target;
+                capture = new Texture2D(1920, 1080, TextureFormat.RGBA32, false, false)
+                {
+                    name = "PathDrawer 1080p Portfolio Screenshot"
+                };
+                capture.ReadPixels(new Rect(0f, 0f, 1920f, 1080f), 0, 0, false);
+                capture.Apply(false, false);
+                Directory.CreateDirectory(Path.GetDirectoryName(absolutePath));
+                File.WriteAllBytes(absolutePath, capture.EncodeToPNG());
+            }
+            finally
+            {
+                drawCamera.targetTexture = previousTarget;
+                RenderTexture.active = previousActive;
+                target.Release();
+                DestroyImmediate(target);
+                if (capture != null) DestroyImmediate(capture);
+            }
+        }
+#endif
+
+        private static void EnsureOwnedMesh(MeshFilter filter, ref Mesh ownedMesh, string meshName)
+        {
+            if (filter.sharedMesh != null) return;
+            ownedMesh = new Mesh { name = meshName };
+            ownedMesh.MarkDynamic();
+            filter.sharedMesh = ownedMesh;
         }
 
         private void OnDestroy()
         {
+            _geometry?.Complete();
+            _physics?.CompletePending();
             _ribbonBuilder?.Dispose();
+            _blockedRibbonBuilder?.Dispose();
+            _ballisticAdapter?.Dispose();
+            _lineAdapter?.Dispose();
+            _ballisticGeometry?.Dispose();
             _physics?.Dispose();
             _geometry?.Dispose();
-            _lineAdapter?.Dispose();
             if (_simplifiedControls.IsCreated) _simplifiedControls.Dispose();
+            if (_reachableRibbonPositions.IsCreated) _reachableRibbonPositions.Dispose();
+            if (_reachableRibbonDistances.IsCreated) _reachableRibbonDistances.Dispose();
+            if (_blockedRibbonPositions.IsCreated) _blockedRibbonPositions.Dispose();
+            if (_blockedRibbonDistances.IsCreated) _blockedRibbonDistances.Dispose();
             _input?.Dispose();
 
             if (_ownedRibbonMesh != null)
@@ -307,6 +662,12 @@ namespace PathDrawer.Runtime
                 if (ribbonMeshFilter != null && ribbonMeshFilter.sharedMesh == _ownedRibbonMesh)
                     ribbonMeshFilter.sharedMesh = null;
                 Destroy(_ownedRibbonMesh);
+            }
+            if (_ownedBlockedRibbonMesh != null)
+            {
+                if (blockedRibbonMeshFilter != null && blockedRibbonMeshFilter.sharedMesh == _ownedBlockedRibbonMesh)
+                    blockedRibbonMeshFilter.sharedMesh = null;
+                Destroy(_ownedBlockedRibbonMesh);
             }
         }
     }

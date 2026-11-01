@@ -1,60 +1,76 @@
 # Audyt implementacji PathDrawer
 
-**Data aktualizacji:** 1 listopada 2026  
+**Data weryfikacji:** 1 listopada 2026
 **Unity Editor:** 6000.6.3f1 (Unity 6.6)  
-**Wynik:** repozytorium jest samodzielnym projektem Unity `PathDrawer`; przykładowa scena, narzędzia edytora, testy i pomiary zostały sprawdzone w GUI edytora. Interakcyjne rysowanie ścieżki myszą w Game View nie zostało potwierdzone w tym przebiegu.
+**Checkout:** samodzielne repozytorium `unity-trajectory-pathdrawer`, poza projektem OmniTwin.
 
-## Zakres implementacji
+## Wynik
+
+Scena demonstracyjna została zbudowana i zapisana przez menu Unity Editor. Test Runner wykonał **7/7 testów EditMode** bez niepowodzeń; w tym test 500 iteracji całego pipeline’u potwierdził **0 B zarządzanej alokacji GC po rozgrzaniu**. Wykonano benchmark 30 próbek dla każdej z trzech wielkości oraz zapisano obraz Game View 1920×1080 do `docs/screenshots/pathdrawer-game-view.png`.
+
+Tryb Live Showcase działał w Play Mode i wyświetlał spline, blokowany odcinek, łuk balistyczny oraz HUD. Nie potwierdzono jeszcze długiego, ciągłego gestu rysowania myszą w ręcznym teście: dostępny sterownik GUI wykonał kliknięcie, które wyłączyło `Auto Showcase`, ale nie utrzymał przycisku przez wiele klatek. Kod wejścia jest podłączony, lecz pełne rysowanie przez użytkownika pozostaje do sprawdzenia w edytorze lub buildzie.
+
+## Cztery podsystemy Engineering X-Ray
 
 ### 01 — Path Input
 
-`PathInputDecimator` przechowuje próbki w buforze `NativeList<float3>` o ustalonej pojemności. Odrzuca próbki na podstawie dystansu i kierunku, a iteracyjny RDP obsługuje `ReadOnlySpan<float3>` oraz `NativeArray<float3>` bez rekurencji. Bufory robocze są przydzielane z wyprzedzeniem.
+`PathInputDecimator` przechowuje próbki w buforze `NativeList<float3>` o ustalonej pojemności. Odrzuca ruch poniżej progów dystansu i skrętu, a iteracyjny RDP obsługuje `ReadOnlySpan<float3>` oraz `NativeArray<float3>` bez rekurencji. Bufor stosu i maska punktów są przydzielane z wyprzedzeniem.
 
-`PathDrawerDemoController` pobiera pozycję wskaźnika przez Input System, z fallbackiem do starego wejścia myszy, rzutuje ją na powierzchnię i łączy etapy pipeline’u podczas przeciągania.
+`PathDrawerDemoController` czyta `Pointer.current` z fallbackiem do legacy `Input.mousePosition`, rzutuje pozycję na powierzchnię i przekazuje próbki do pipeline’u. W próbce GUI wejście klawiatury potwierdzono: `B`/`S` zmienia tryb, `R` przywraca showcase; kliknięcie wyłączyło `Auto Showcase`.
 
 ### 02 — Path Geometry
 
-`CentripetalCatmullRomResampler` udostępnia spline Catmull–Rom z α = 0,5, tablicę LUT długości łuku i resampling po stałym dystansie. Tryb balistyczny z prędkością początkową, grawitacją i oporem wykorzystuje ten sam format próbek i API ewaluacji dystansu.
+`CentripetalCatmullRomResampler` generuje spline Catmull–Rom z α = 0,5, tablicę LUT długości łuku oraz punkty oddalone o stały dystans. Tryb balistyczny korzysta z tego samego formatu i ewaluacji według dystansu. Testy sprawdzają interpolację punktów kontrolnych, zachowanie na ostrym skręcie oraz odstęp `0,20 m` z tolerancją poniżej `1e-3 m`.
 
-Walidacja granic odrzuca nadmiarowe `LookupSegments` przed planowaniem jobów i sprawdza liczbę próbek względem długości wszystkich buforów natywnych przed ewaluacją.
+### 03 — Line Renderer i ribbon
 
-### 03 — Line Renderer i Ribbon
-
-`PathRenderAdapter` aktualizuje podłączone renderery z tablic natywnych. `BurstRibbonMeshBuilder` zapisuje siatkę do `MeshData` w zadaniu Burst; tworzy indeksy, tangenty i UV ciągłe po długości łuku. Łączenia miter/bevel ograniczają zwężanie na ostrych zakrętach.
+`PathRenderAdapter` przekazuje dane z tablic natywnych do `LineRenderer`. `BurstRibbonMeshBuilder` zapisuje geometrię w writable `MeshData` z zadania Burst; generuje indeksy, tangenty, ciągłe UV długości łuku oraz łączenia miter/bevel. Test alokacji całego pipeline’u obejmuje generowanie ribbonu.
 
 ### 04 — Trajectory View i batched physics
 
-`TrajectoryPhysicsValidator` używa `RaycastCommand.ScheduleBatch` do projekcji punktów na teren oraz `SpherecastCommand.ScheduleBatch` do sprawdzania przeszkód. Wynik identyfikuje pierwszy punkt blokady, aby adapter renderowania mógł rozdzielić odcinek osiągalny i zablokowany. Scena przykładowa zawiera nierówny teren i przeszkody na jawnie skonfigurowanej warstwie.
+`TrajectoryPhysicsValidator` używa `RaycastCommand.ScheduleBatch` do projekcji punktów na teren oraz `SpherecastCommand.ScheduleBatch` do wykrywania blokad. Wynik zachowuje pierwsze trafienie, punkt wpływu i długość osiągalnego odcinka. W świeżo skompilowanym Play Mode nie powtórzyły się wcześniejsze wyjątki safety jobów; poprawka jawnie wywołuje `Complete()` przed odczytem wyników batcha.
 
-## Testy i pomiary
+## Testy i benchmark
 
-Przed odłączeniem nazw assembly i namespace od wcześniejszego kontenera w Unity Test Runner uruchomiono wszystkie **7 testów: 7 passed, 0 failed, 0 ignored**. Wśród nich są testy redukcji RDP z zachowaniem końców, interpolacji spline i ostrych zakrętów, równomiernego dystansu, walidacji zakresów oraz test alokacji. Po zmianie nazw assembly należy powtórzyć suite po otwarciu checkoutu z nowej lokalizacji.
+Test Runner EditMode: **7 passed, 0 failed, 0 ignored**. Test `FullPipelineFrameLoop_AllocatesZeroManagedBytesAfterWarmup` mierzy 500 rozgrzanych iteracji Path Input + geometrii + writable-MeshData ribbonu przy użyciu `GC.GetAllocatedBytesForCurrentThread()` i przeszedł asercję `0 B`. Osobny test mierzy 1 000 przebudów geometrii.
 
-`FullPipelineFrameLoop_AllocatesZeroManagedBytesAfterWarmup` wykonał 500 rozgrzanych iteracji połączonych etapów wejścia, geometrii i generowania ribbonu z asercją `GC.GetAllocatedBytesForCurrentThread()`. Wynik testu: **0 B zarządzanej alokacji** w mierzonym zakresie testu. Nie jest to pomiar wszystkich ścieżek Unity, zapytań fizyki, renderowania GPU ani dowolnego kodu integrującego.
+Benchmark uruchomiono z menu Unity Editor. Metoda wykonuje 3 rozgrzewki i 30 mierzonych próbek dla każdej wielkości. Sprzęt: **13th Gen Intel(R) Core(TM) i3-13100F**; Unity **6000.6.3f1**.
 
-Benchmark uruchomiono z menu edytora, po trzech rozgrzewkach Burst i 30 mierzonych próbach na każdą wielkość wejścia. Sprzęt: **13th Gen Intel(R) Core(TM) i3-13100F**.
-
-| Wejście | Po RDP | Wynikowe punkty | RDP mediana (µs) | Spline + LUT mediana (µs) | Ribbon mediana (µs) | Całość mediana (µs) | Całość P95 (µs) |
+| Wejście | Po RDP | Punkty wyjściowe | RDP mediana (µs) | Spline + LUT mediana (µs) | Ribbon mediana (µs) | Całość mediana (µs) | Całość P95 (µs) |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 100 | 10 | 110 | 125.6 | 124.4 | 32.8 | 288.1 | 341.8 |
-| 500 | 42 | 552 | 962.1 | 620.1 | 85.7 | 1681.4 | 1843.5 |
-| 2000 | 172 | 2211 | 5397.8 | 2479.9 | 239.5 | 8082.8 | 8502.0 |
+| 100 | 10 | 110 | 115.3 | 115.7 | 29.0 | 256.8 | 276.5 |
+| 500 | 42 | 552 | 1022.7 | 628.1 | 119.1 | 1854.0 | 2186.9 |
+| 2000 | 172 | 2211 | 5203.6 | 2402.1 | 251.9 | 7802.9 | 9430.1 |
 
-Zakres pomiaru obejmuje RDP, spline/LUT, resampling, alokację writable `MeshData`, job ribbonu i zastosowanie siatki. Nie obejmuje czasu GPU ani renderowania sceny. Narzędzie edytora aktualizuje `README.md` oraz [`PathDrawer-Benchmark-Results.md`](PathDrawer-Benchmark-Results.md).
+Zakres obejmuje iteracyjny RDP, Burst spline/LUT, uniform-distance resampling, alokację writable `MeshData`, generowanie ribbonu i zastosowanie siatki. Nie obejmuje GPU, renderowania sceny ani zapytań fizycznych. Pełna tabela i opis środowiska są w [`PathDrawer-Benchmark-Results.md`](PathDrawer-Benchmark-Results.md).
 
-## Reprodukcja w Unity Editor
+## Scena i zrzut ekranu
 
-1. Otwórz projekt w Unity `6000.6.3f1` i poczekaj na import pakietów oraz kompilację.
-2. Uruchom `Tools > PathDrawer > 1. Build & Save Ready-to-Play SampleScene`, aby odtworzyć zapisaną scenę demonstracyjną.
-3. Otwórz `Window > General > Test Runner`, wybierz EditMode i uruchom wszystkie testy.
-4. Uruchom `Tools > PathDrawer > 2. Run Benchmark Sweep & Export Markdown`, aby wykonać serię benchmarków i odświeżyć tabelę.
+Menu `Tools > PathDrawer > 1. Build & Save Ready-to-Play SampleScene` wygenerowało `Assets/Scenes/SampleScene.unity` z terenem, plateau i rampami, przeszkodami na warstwie `PathDrawerObstacles`, kamerą perspektywiczną, materiałami URP, rendererami linii/siatki, znacznikami wpływu, HUD-em i podłączonym kontrolerem.
 
-GUI potwierdziło, że scena i narzędzie benchmarku działają, a konsola nie zgłaszała błędów po tych operacjach. Po zmianie namespace/assembly GUI testów nie powtórzono. Wygenerowane projekty C# zbudowały się po tych zmianach bez błędów; dwa ostrzeżenia dotyczyły konfliktu wersji `System.Numerics.Vectors` w referencjach edytora. Próba przeciągnięcia wskaźnika nie pokazała narysowanej ścieżki, dlatego interakcję runtime należy potwierdzić ręcznie po otwarciu projektu z docelowego katalogu.
+Menu `Tools > PathDrawer > 3. Capture 1080p Portfolio Screenshot` uruchomiło scenę, odczekało 60 klatek i zapisało `docs/screenshots/pathdrawer-game-view.png`. Obraz został obejrzany: pokazuje HUD, siatkę terenu, trzy przeszkody, osiągalną turkusową ścieżkę, czerwony zablokowany odcinek i żółty łuk balistyczny.
 
-## Stan repozytorium
+## Odtworzenie w GUI Unity
 
-- Repozytorium jest osobnym checkoutem w `unity-trajectory-pathdrawer`; przestrzenie nazw i nazwy assembly definitions używają teraz wyłącznie `PathDrawer`.
-- `ProjectSettings` ustawia produkt na `PathDrawer`, a nazwę wydawcy na `Mr444-dev`.
-- Root zawiera licencję MIT, benchmark i workflow GitHub Actions; prerelease `com.unity.ai.assistant` nie znajduje się w `Packages/manifest.json`.
-- `Assets/Editor/HubForceResolve.cs` nie jest obecny.
-- Wyniki bezpieczeństwa z wcześniejszego audytu miały zakres częściowy; ten dokument nie stanowi pełnego audytu zależności ani zachowania edytora Unity.
+1. Otwórz samodzielny katalog repozytorium w Unity `6000.6.3f1` i poczekaj na import oraz kompilację.
+2. Jeśli pliki `.cs` zmieniono poza edytorem, użyj `Assets > Refresh`; w tym przebiegu ten krok był potrzebny do przeładowania źródeł.
+3. Uruchom `Tools > PathDrawer > 1. Build & Save Ready-to-Play SampleScene`.
+4. Otwórz `Window > General > Test Runner`, wybierz EditMode i kliknij `Run All`.
+5. Uruchom `Tools > PathDrawer > 2. Run Benchmark Sweep & Export Markdown`.
+6. Uruchom `Tools > PathDrawer > 3. Capture 1080p Portfolio Screenshot`.
+7. Wejdź w Play Mode, wybierz tryb `S`/`B`, rysuj lewym przyciskiem myszy i wciśnij `R`, aby przywrócić showcase.
+
+## Znane ograniczenia weryfikacji
+
+- Po `Assets > Reimport All` Unity odbudowało cache i ponownie otworzyło właściwy projekt. Podczas odtwarzania cache wystąpiły przejściowe błędy importu edytora Input System oraz błąd kompilacji `CS1503` w edytorowym hooku zrzutu ekranu. Hook zmieniono na wyszukanie obiektu sceny o ustalonej nazwie; po `Assets > Refresh` skrypty skompilowały się, błędy importu Input System zniknęły po zakończeniu importu, a testy EditMode ponownie przeszły 7/7.
+- Podczas importu pakietu URP pojawił się komunikat edytora: `Host type is not matching any asset type` dla `Packages/com.unity.render-pipelines.core/Editor/Lighting/ProbeVolume/RenderingLayerMask/TraceRenderingLayerMask.urtshader`. To zasób pakietu URP, a renderowanie sceny, kompilacja skryptów i testy działały. Nie znaleziono potwierdzonej poprawki w repozytorium; dlatego nie deklaruję czystego logu Unity na każdej maszynie.
+- Testy i benchmark wykonano z GUI Unity. Nie uruchomiono builda standalone ani workflow GitHub Actions w tym przebiegu.
+- Automatyzacja potwierdziła wejście klawiatury i reakcję na kliknięcie, ale nie sprawdziła ciągłego gestu myszy przez wiele klatek.
+- `0 B` dotyczy zarządzanej alokacji w zakresie testu po rozgrzaniu. Writable `MeshData`, pamięć natywna, synchronizacja jobów i upload GPU są osobnymi kosztami.
+
+## Repozytorium i zależności
+
+- Projekt jest osobnym repozytorium `unity-trajectory-pathdrawer`, a nie podprojektem OmniTwin.
+- `Packages/manifest.json` nie zawiera prerelease `com.unity.ai.assistant`.
+- Główny katalog zawiera licencję MIT i workflow GitHub Actions dla EditMode.
+- `Assets/Editor/HubForceResolve.cs` nie znajduje się w checkoutcie.

@@ -157,6 +157,9 @@ namespace PathDrawer.Physics
 
             if (!_blockerPending) return false;
             if (!_blockerHandle.IsCompleted) return false;
+            // IsCompleted is only a readiness check; Complete transfers NativeArray safety ownership
+            // to this thread before CompleteBlockerResults reads the batch output buffer.
+            _blockerHandle.Complete();
             CompleteBlockerResults();
             return true;
         }
