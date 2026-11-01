@@ -1,12 +1,12 @@
 using System;
-using OmniTwin.PathDrawer.Geometry;
+using PathDrawer.Geometry;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 
-namespace OmniTwin.PathDrawer.Physics
+namespace PathDrawer.Physics
 {
     /// <summary>Runs batched terrain projection followed by batched swept-volume blocker queries.</summary>
     public sealed class TrajectoryPhysicsValidator : IDisposable

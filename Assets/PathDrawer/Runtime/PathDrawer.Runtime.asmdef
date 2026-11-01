@@ -1,6 +1,6 @@
 {
-  "name": "OmniTwin.PathDrawer.Runtime",
-  "rootNamespace": "OmniTwin.PathDrawer",
+  "name": "PathDrawer.Runtime",
+  "rootNamespace": "PathDrawer",
   "references": [
     "Unity.Burst",
     "Unity.Collections",

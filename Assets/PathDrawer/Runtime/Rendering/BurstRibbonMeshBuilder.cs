@@ -2,12 +2,13 @@ using System;
 using System.Runtime.InteropServices;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace OmniTwin.PathDrawer.Rendering
+namespace PathDrawer.Rendering
 {
     public enum RibbonJoinMode : byte
     {
@@ -160,7 +161,9 @@ namespace OmniTwin.PathDrawer.Rendering
         public RibbonJoinMode JoinMode;
         public float3 SurfaceUp;
         [WriteOnly] public NativeArray<RibbonVertex> Vertices;
-        [WriteOnly] public NativeArray<uint> Indices;
+        // MeshData exposes separate vertex/index views over one writable allocation. Unity's
+        // safety system treats those views as aliases even though the streams are disjoint.
+        [WriteOnly, NativeDisableContainerSafetyRestriction] public NativeArray<uint> Indices;
         [WriteOnly] public NativeArray<float3> BoundsMinMax;
 
         public void Execute()

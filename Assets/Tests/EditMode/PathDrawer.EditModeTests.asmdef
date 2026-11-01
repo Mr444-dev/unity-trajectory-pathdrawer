@@ -1,8 +1,8 @@
 {
-  "name": "OmniTwin.PathDrawer.EditModeTests",
-  "rootNamespace": "OmniTwin.PathDrawer.Tests",
+  "name": "PathDrawer.EditModeTests",
+  "rootNamespace": "PathDrawer.Tests",
   "references": [
-    "OmniTwin.PathDrawer.Runtime",
+    "PathDrawer.Runtime",
     "Unity.Collections",
     "Unity.Mathematics"
   ],

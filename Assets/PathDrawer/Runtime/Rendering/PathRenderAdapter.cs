@@ -3,7 +3,7 @@ using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 
-namespace OmniTwin.PathDrawer.Rendering
+namespace PathDrawer.Rendering
 {
     /// <summary>Pushes native path samples into zero-copy LineRenderer NativeArray slices.</summary>
     public sealed class PathRenderAdapter : IDisposable

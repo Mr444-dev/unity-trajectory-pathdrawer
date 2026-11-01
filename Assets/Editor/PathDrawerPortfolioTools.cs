@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
-using OmniTwin.PathDrawer.Runtime;
+using PathDrawer.Runtime;
 using UnityEditor;
 using UnityEditor.Events;
 using UnityEditor.SceneManagement;
@@ -11,7 +11,7 @@ using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-namespace OmniTwin.PathDrawer.Editor
+namespace PathDrawer.Editor
 {
     /// <summary>Builds the playable portfolio scene and publishes editor-measured benchmark results.</summary>
     public static class PathDrawerPortfolioTools

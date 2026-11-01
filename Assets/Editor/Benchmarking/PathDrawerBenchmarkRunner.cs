@@ -1,16 +1,17 @@
 using System;
 using System.IO;
+using System.Globalization;
 using System.Text;
 using Stopwatch = System.Diagnostics.Stopwatch;
-using OmniTwin.PathDrawer.Geometry;
-using OmniTwin.PathDrawer.Input;
-using OmniTwin.PathDrawer.Rendering;
+using PathDrawer.Geometry;
+using PathDrawer.Input;
+using PathDrawer.Rendering;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
-namespace OmniTwin.PathDrawer.Editor
+namespace PathDrawer.Editor
 {
     /// <summary>Measures the full CPU path rebuild and exports median/p95 timings as Markdown.</summary>
     public static class PathDrawerBenchmarkRunner
@@ -42,7 +43,7 @@ namespace OmniTwin.PathDrawer.Editor
             for (int i = 0; i < results.Length; i++)
             {
                 BenchmarkResult result = results[i];
-                markdown.AppendLine($"| {result.InputCount} | {result.SimplifiedCount} | {result.ResampledCount} | {result.RdpMedianMicroseconds:F1} | {result.GeometryMedianMicroseconds:F1} | {result.RibbonMedianMicroseconds:F1} | {result.TotalMedianMicroseconds:F1} | {result.TotalP95Microseconds:F1} |");
+                markdown.AppendLine($"| {result.InputCount} | {result.SimplifiedCount} | {result.ResampledCount} | {FormatMicroseconds(result.RdpMedianMicroseconds)} | {FormatMicroseconds(result.GeometryMedianMicroseconds)} | {FormatMicroseconds(result.RibbonMedianMicroseconds)} | {FormatMicroseconds(result.TotalMedianMicroseconds)} | {FormatMicroseconds(result.TotalP95Microseconds)} |");
             }
             markdown.AppendLine();
             markdown.AppendLine("Timed scope: iterative RDP, Burst centripetal spline LUT, uniform-distance resampling, writable MeshData allocation, Burst ribbon generation, and mesh application. Scene rendering and GPU time are excluded.");
@@ -123,6 +124,8 @@ namespace OmniTwin.PathDrawer.Editor
             UnityEngine.Object.DestroyImmediate(mesh);
             return result;
         }
+
+        private static string FormatMicroseconds(double value) => value.ToString("F1", CultureInfo.InvariantCulture);
 
         private struct BenchmarkResult
         {

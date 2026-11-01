@@ -2,12 +2,12 @@ using System;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
-using OmniTwin.PathDrawer.Geometry;
-using OmniTwin.PathDrawer.Input;
-using OmniTwin.PathDrawer.Rendering;
+using PathDrawer.Geometry;
+using PathDrawer.Input;
+using PathDrawer.Rendering;
 using UnityEngine;
 
-namespace OmniTwin.PathDrawer.Tests
+namespace PathDrawer.Tests
 {
     /// <summary>Geometry and steady-state allocation regression coverage for the PathDrawer runtime assembly.</summary>
     [TestFixture]

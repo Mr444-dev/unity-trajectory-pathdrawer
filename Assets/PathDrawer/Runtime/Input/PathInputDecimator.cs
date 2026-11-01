@@ -2,7 +2,7 @@ using System;
 using Unity.Collections;
 using Unity.Mathematics;
 
-namespace OmniTwin.PathDrawer.Input
+namespace PathDrawer.Input
 {
     /// <summary>Captures pointer samples and reduces jittery paths with iterative RDP.</summary>
     public sealed class PathInputDecimator : IDisposable

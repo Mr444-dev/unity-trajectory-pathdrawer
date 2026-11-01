@@ -4,7 +4,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 
-namespace OmniTwin.PathDrawer.Geometry
+namespace PathDrawer.Geometry
 {
     /// <summary>Controls a drag-free ballistic trajectory sampled into the same arc-length pipeline as splines.</summary>
     public readonly struct BallisticTrajectorySettings
@@ -267,8 +267,8 @@ namespace OmniTwin.PathDrawer.Geometry
         public int ControlPointCount;
         public int SamplesPerSegment;
         public int LookupCount;
-        [WriteOnly] public NativeArray<float3> LookupPositions;
-        [WriteOnly] public NativeArray<float> CumulativeLengths;
+        public NativeArray<float3> LookupPositions;
+        public NativeArray<float> CumulativeLengths;
 
         public void Execute()
         {
@@ -296,8 +296,8 @@ namespace OmniTwin.PathDrawer.Geometry
     {
         public BallisticTrajectorySettings Settings;
         public int LookupCount;
-        [WriteOnly] public NativeArray<float3> LookupPositions;
-        [WriteOnly] public NativeArray<float> CumulativeLengths;
+        public NativeArray<float3> LookupPositions;
+        public NativeArray<float> CumulativeLengths;
 
         public void Execute()
         {

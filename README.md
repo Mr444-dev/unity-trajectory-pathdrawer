@@ -102,10 +102,10 @@ The guarantee depends on these operating rules:
 The manifest directly references Burst, Collections, and Mathematics at the versions resolved by this Unity 6 project. The project uses URP 17.6.0. Create two LineRenderers if you want reachable/blocked coloring; the blocked renderer is optional.
 
 ```csharp
-using OmniTwin.PathDrawer.Geometry;
-using OmniTwin.PathDrawer.Input;
-using OmniTwin.PathDrawer.Physics;
-using OmniTwin.PathDrawer.Rendering;
+using PathDrawer.Geometry;
+using PathDrawer.Input;
+using PathDrawer.Physics;
+using PathDrawer.Rendering;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -147,7 +147,7 @@ Treat the owners as long-lived objects and dispose them in reverse order when th
 
 ## Tests and benchmarks
 
-The runtime systems compile in [`OmniTwin.PathDrawer.Runtime.asmdef`](Assets/PathDrawer/Runtime/OmniTwin.PathDrawer.Runtime.asmdef). NUnit EditMode tests, including the 500-iteration end-to-end allocation probe, live in [`PathDrawerGeometryTests.cs`](Assets/Tests/EditMode/PathDrawerGeometryTests.cs) and the Editor-only [`OmniTwin.PathDrawer.EditModeTests.asmdef`](Assets/Tests/EditMode/OmniTwin.PathDrawer.EditModeTests.asmdef).
+The runtime systems compile in [`PathDrawer.Runtime.asmdef`](Assets/PathDrawer/Runtime/PathDrawer.Runtime.asmdef). NUnit EditMode tests, including the 500-iteration end-to-end allocation probe, live in [`PathDrawerGeometryTests.cs`](Assets/Tests/EditMode/PathDrawerGeometryTests.cs) and the Editor-only [`PathDrawer.EditModeTests.asmdef`](Assets/Tests/EditMode/PathDrawer.EditModeTests.asmdef).
 
 Run **Window → General → Test Runner → EditMode → Run All**. Coverage includes:
 
@@ -157,20 +157,18 @@ Run **Window → General → Test Runner → EditMode → Run All**. Coverage in
 - `GC.GetAllocatedBytesForCurrentThread()` across 1,000 warmed geometry rebuilds.
 - `GC.GetAllocatedBytesForCurrentThread()` across 500 warmed input + geometry + writable-MeshData ribbon frame-loop iterations.
 
-The demo scene and portfolio benchmark have dedicated Editor GUI commands under **Tools → PathDrawer**:
+The demo scene and portfolio benchmark have dedicated Editor GUI commands under **Tools → PathDrawer**. Both commands were run in Unity 6000.6.3f1, and the benchmark results below were exported from the editor:
 
 1. **1. Build & Save Ready-to-Play SampleScene** creates and wires the uneven terrain, obstacle layer and pillars, camera, renderers, ribbon material, controller, EventSystem, and mode buttons in `Assets/Scenes/SampleScene.unity`.
 2. **2. Run Benchmark Sweep & Export Markdown** warms Burst, runs 30 measured samples for 100, 500, and 2,000 points, writes `PathDrawer-Benchmark-Results.md`, and replaces the README table with the measured median and P95 values from that machine.
 
-The existing **PathDrawer → Benchmarks → Run 100, 500, 2,000 points** command remains available for exporting the standalone results file. Benchmarks report the processor type and Unity version. The table below contains placeholders until the Editor benchmark command has been run on the target machine; no synthetic timings are published.
-
-The EditMode tests and Editor scene/benchmark commands are intended to run in the Unity 6000.6.3f1 GUI. This checkout's new editor workflows have not been executed in the Editor yet, so the sample scene and benchmark measurements must be generated there before claiming a verified build or performance baseline. See [IMPLEMENTATION_AUDIT_PL.md](IMPLEMENTATION_AUDIT_PL.md) for the existing implementation and audit record.
+Benchmarks report the processor type and Unity version. The complete EditMode suite passed 7/7 in the Unity GUI before the project identity and assembly names were decoupled from their previous container. The final namespace changes were source-built with the generated Unity C# project files; rerun EditMode in the relocated project to verify the renamed assembly definitions in Unity itself. Runtime drag-to-draw still needs a manual visual smoke test. See [IMPLEMENTATION_AUDIT_PL.md](IMPLEMENTATION_AUDIT_PL.md) for the detailed audit record and verification scope.
 
 | Input points | RDP points | Output points | RDP median (µs) | Spline + LUT median (µs) | Ribbon median (µs) | Total median (µs) | Total P95 (µs) |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 100 | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded |
-| 500 | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded |
-| 2,000 | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded |
+| 100 | 10 | 110 | 125.6 | 124.4 | 32.8 | 288.1 | 341.8 |
+| 500 | 42 | 552 | 962.1 | 620.1 | 85.7 | 1681.4 | 1843.5 |
+| 2000 | 172 | 2211 | 5397.8 | 2479.9 | 239.5 | 8082.8 | 8502.0 |
 
 ## Capacity and profiling notes
 

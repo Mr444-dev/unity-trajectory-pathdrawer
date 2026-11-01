@@ -1,7 +1,7 @@
-using OmniTwin.PathDrawer.Geometry;
-using OmniTwin.PathDrawer.Input;
-using OmniTwin.PathDrawer.Physics;
-using OmniTwin.PathDrawer.Rendering;
+using PathDrawer.Geometry;
+using PathDrawer.Input;
+using PathDrawer.Physics;
+using PathDrawer.Rendering;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -11,7 +11,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 #endif
 
-namespace OmniTwin.PathDrawer.Runtime
+namespace PathDrawer.Runtime
 {
     /// <summary>Connects pointer capture, trajectory generation, batched validation, and both renderers.</summary>
     [DisallowMultipleComponent]
