@@ -8,7 +8,7 @@
 
 Scena demonstracyjna została zbudowana i zapisana przez menu Unity Editor. Test Runner wykonał **7/7 testów EditMode** bez niepowodzeń; w tym test 500 iteracji całego pipeline’u potwierdził **0 B zarządzanej alokacji GC po rozgrzaniu**. Wykonano benchmark 30 próbek dla każdej z trzech wielkości oraz zapisano obraz Game View 1920×1080 do `docs/screenshots/pathdrawer-game-view.png`.
 
-Tryb Live Showcase działał w Play Mode i wyświetlał spline, blokowany odcinek, łuk balistyczny oraz HUD. Nie potwierdzono jeszcze długiego, ciągłego gestu rysowania myszą w ręcznym teście: dostępny sterownik GUI wykonał kliknięcie, które wyłączyło `Auto Showcase`, ale nie utrzymał przycisku przez wiele klatek. Kod wejścia jest podłączony, lecz pełne rysowanie przez użytkownika pozostaje do sprawdzenia w edytorze lub buildzie.
+Tryb Live Showcase działał w Play Mode i wyświetlał spline, blokowany odcinek, łuk balistyczny oraz HUD. Dwie próby gestu `drag` przez automatyzację GUI nie zmieniły widocznej trajektorii, więc ciągłe rysowanie myszą pozostaje niezweryfikowane. Kod wejścia jest podłączony; pełny gest należy sprawdzić ręcznie w edytorze lub buildzie.
 
 ## Cztery podsystemy Engineering X-Ray
 
@@ -64,7 +64,7 @@ Menu `Tools > PathDrawer > 3. Capture 1080p Portfolio Screenshot` uruchomiło sc
 
 - Po `Assets > Reimport All` Unity odbudowało cache i ponownie otworzyło właściwy projekt. Podczas odtwarzania cache wystąpiły przejściowe błędy importu edytora Input System oraz błąd kompilacji `CS1503` w edytorowym hooku zrzutu ekranu. Hook zmieniono na wyszukanie obiektu sceny o ustalonej nazwie; po `Assets > Refresh` skrypty skompilowały się, błędy importu Input System zniknęły po zakończeniu importu, a testy EditMode ponownie przeszły 7/7.
 - Podczas importu pakietu URP pojawił się komunikat edytora: `Host type is not matching any asset type` dla `Packages/com.unity.render-pipelines.core/Editor/Lighting/ProbeVolume/RenderingLayerMask/TraceRenderingLayerMask.urtshader`. To zasób pakietu URP, a renderowanie sceny, kompilacja skryptów i testy działały. Nie znaleziono potwierdzonej poprawki w repozytorium; dlatego nie deklaruję czystego logu Unity na każdej maszynie.
-- Testy i benchmark wykonano z GUI Unity. Push `7fd32ec` uruchomił GitHub Actions, ale GameCI nie mógł aktywować Unity, ponieważ sekret `UNITY_LICENSE` nie jest skonfigurowany. Workflow zaktualizowano, by zawsze sprawdzał metadane projektu i jawnie pomijał testy EditMode bez licencji; nowy wynik CI należy oceniać po kolejnym pushu. Nie uruchomiono builda standalone.
+- Testy i benchmark wykonano z GUI Unity. Push `7fd32ec` uruchomił GitHub Actions, ale GameCI nie mógł aktywować Unity, ponieważ sekret `UNITY_LICENSE` nie jest skonfigurowany. Po aktualizacji workflow commit `9be567e` zakończył się statusem CI `success`: kontrola metadanych przeszła, a krok Unity EditMode został jawnie pominięty z powodu braku licencji. Właściwa suite EditMode przeszła 7/7 w lokalnym Unity GUI. Nie uruchomiono builda standalone.
 - Automatyzacja potwierdziła wejście klawiatury i reakcję na kliknięcie, ale nie sprawdziła ciągłego gestu myszy przez wiele klatek.
 - `0 B` dotyczy zarządzanej alokacji w zakresie testu po rozgrzaniu. Writable `MeshData`, pamięć natywna, synchronizacja jobów i upload GPU są osobnymi kosztami.
 
