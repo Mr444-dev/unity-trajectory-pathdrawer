@@ -30,6 +30,6 @@ Material:
     - _Opacity: 0.9
     - _ScrollSpeed: 0.32
     m_Colors:
-    - _HDRColor: {r: 0.02, g: 2.2, b: 2.3, a: 0.95}
+    - _HDRColor: {r: 0.02, g: 2.4, b: 2.08, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -62,7 +62,7 @@ namespace PathDrawer.Runtime
         [Header("Live tactical showcase")]
         [SerializeField] private bool autoShowcase = true;
         [SerializeField] private bool showBallisticPreview = true;
-        [SerializeField, Range(32, 256)] private int showcaseRawPointCount = 120;
+        [SerializeField, Range(32, 256)] private int showcaseRawPointCount = 140;
         [SerializeField, Min(0f)] private float showcaseBreathingAmplitude = 0.12f;
 
         [Header("Ballistic arc")]
@@ -71,10 +71,10 @@ namespace PathDrawer.Runtime
         [SerializeField, Min(0f)] private float ballisticDrag;
 
         [Header("Rendering and queries")]
-        [SerializeField, Min(0.01f)] private float ribbonWidth = 0.45f;
+        [SerializeField, Min(0.01f)] private float ribbonWidth = 0.55f;
         [SerializeField, Min(0.01f)] private float ribbonUvMetersPerTile = 1f;
         [SerializeField, Min(0f)] private float blockerRadius = 0.2f;
-        [SerializeField, Min(0f)] private float surfaceOffset = 0.035f;
+        [SerializeField, Min(0f)] private float surfaceOffset = 0.06f;
         [SerializeField, Min(0f)] private float pointerRayDistance = 200f;
 
         private PathInputDecimator _input;
@@ -118,6 +118,11 @@ namespace PathDrawer.Runtime
         public TrajectoryMode CurrentMode => mode;
         public bool IsAutoShowcase => autoShowcase;
         public float ReachableDistance => _physics != null ? _physics.ReachableDistance : 0f;
+        public LineRenderer ReachableLineRenderer => reachableLine;
+        public LineRenderer BlockedLineRenderer => blockedLine;
+        public LineRenderer BallisticLineRenderer => ballisticArcLine;
+        public MeshFilter ReachableRibbonMeshFilter => ribbonMeshFilter;
+        public string TelemetryText => telemetryText != null ? telemetryText.text : string.Empty;
 
         private void Awake()
         {
@@ -169,20 +174,23 @@ namespace PathDrawer.Runtime
             mode = TrajectoryMode.SplineTerrain;
         }
 
+        private void Start()
+        {
+            if (!autoShowcase) return;
+            RebuildCurrentTrajectory();
+            UpdateTelemetry();
+        }
+
         private void Update()
         {
             _frameStartTicks = Stopwatch.GetTimestamp();
             ReadModeHotkeys();
             CapturePointer();
-            AdvancePipeline();
 
-            if (autoShowcase && !_isDragging && !_geometryPending && !_physicsPending)
-            {
-                BuildShowcaseSamples(Time.time);
-                RebuildBallisticPreview(_showcaseStart, _showcaseEnd);
-                _needsRebuild = true;
+            if (autoShowcase && !_isDragging)
+                RebuildCurrentTrajectory();
+            else
                 AdvancePipeline();
-            }
 
             if (Time.unscaledTime >= _lastTelemetryTime)
                 UpdateTelemetry();
@@ -211,6 +219,22 @@ namespace PathDrawer.Runtime
             mode = TrajectoryMode.SplineTerrain;
             _input?.Clear();
             _needsRebuild = false;
+        }
+
+        /// <summary>Rebuilds the complete portfolio showcase synchronously for deterministic capture.</summary>
+        public void RebuildNow()
+        {
+            if (!isActiveAndEnabled || _geometry == null || _physics == null)
+                throw new InvalidOperationException("PathDrawer must be active in Play Mode before rebuilding the showcase.");
+
+            CompleteOutstandingWork();
+            autoShowcase = true;
+            _isDragging = false;
+            mode = TrajectoryMode.SplineTerrain;
+            showBallisticPreview = true;
+            if (ballisticArcLine != null) ballisticArcLine.enabled = true;
+            RebuildCurrentTrajectory();
+            UpdateTelemetry();
         }
 
         private void SetMode(TrajectoryMode nextMode)
@@ -324,10 +348,10 @@ namespace PathDrawer.Runtime
                 new float3(-7.5f, 0f, -6.5f),
                 new float3(-5.7f, 0.1f, -4.7f),
                 new float3(-4f, 0.55f, -2.5f),
-                new float3(-2f, 1.4f, -1f),
-                new float3(-0.9f, 1.4f, 0.15f),
-                new float3(-0.15f, 1.4f, 1.15f),
-                new float3(1.2f, 1.35f, 2.3f),
+                new float3(-2f, 1.2f, -1f),
+                new float3(-0.9f, 1.2f, 0.15f),
+                new float3(-0.15f, 1.2f, 1.15f),
+                new float3(1.2f, 1.2f, 2.3f),
                 new float3(2.8f, 0.85f, 3f),
                 new float3(4.2f, 0.05f, 3.2f),
                 new float3(7.5f, 0.05f, 6f)
@@ -382,6 +406,70 @@ namespace PathDrawer.Runtime
                 BallisticLookupSegments);
             _ballisticGeometry.RebuildBallistic(settings, 0.16f).Complete();
             _ballisticAdapter.Apply(_ballisticGeometry.Positions, _ballisticGeometry.Count);
+        }
+
+        private void RebuildCurrentTrajectory()
+        {
+            CompleteOutstandingWork();
+            BuildShowcaseSamples(Time.time);
+            _scheduledMode = mode;
+
+            _pipelineTimingActive = true;
+            long startTicks = Stopwatch.GetTimestamp();
+            _lastRdpPointCount = _input.Simplify(simplifyTolerance, _simplifiedControls);
+            if (_lastRdpPointCount < 2)
+                throw new InvalidOperationException($"The showcase RDP pass produced only {_lastRdpPointCount} control points.");
+
+            if (_scheduledMode == TrajectoryMode.SplineTerrain)
+            {
+                _geometry.RebuildSpline(
+                    _simplifiedControls,
+                    _lastRdpPointCount,
+                    lookupSamplesPerSegment,
+                    outputSpacing).Complete();
+            }
+            else
+            {
+                float3 origin = _simplifiedControls[0];
+                float3 destination = _simplifiedControls[_lastRdpPointCount - 1];
+                float3 horizontal = new float3(destination.x - origin.x, 0f, destination.z - origin.z);
+                float duration = math.max(0.1f, ballisticDuration);
+                float verticalSpeed = math.abs(ballisticGravity.y) * duration * 0.5f;
+                var settings = new BallisticTrajectorySettings(
+                    origin,
+                    horizontal / duration + new float3(0f, verticalSpeed, 0f),
+                    ballisticGravity,
+                    ballisticDrag,
+                    duration,
+                    math.max(2, _geometry.LookupCapacity - 1));
+                _geometry.RebuildBallistic(settings, outputSpacing).Complete();
+            }
+
+            int outputCount = _geometry.Count;
+            if (outputCount < 2)
+                throw new InvalidOperationException($"The showcase geometry pass produced only {outputCount} vertices.");
+
+            _lastGeometryOutputCount = outputCount;
+            _physics.ScheduleValidation(_geometry, outputCount, _scheduledMode == TrajectoryMode.SplineTerrain);
+            _physics.ScheduleBlockerCasts();
+            _physics.CompleteValidation();
+            ApplyValidatedPath(outputCount);
+            RebuildBallisticPreview(_showcaseStart, _showcaseEnd);
+
+            _geometryPending = false;
+            _physicsPending = false;
+            _needsRebuild = false;
+            _pipelineTimingActive = false;
+            _pipelineCompletedThisFrame = false;
+            _lastPipelineMicroseconds = (float)((Stopwatch.GetTimestamp() - startTicks) * (1_000_000.0 / Stopwatch.Frequency));
+        }
+
+        private void CompleteOutstandingWork()
+        {
+            _geometry?.Complete();
+            _physics?.CompletePending();
+            _geometryPending = false;
+            _physicsPending = false;
         }
 
         private void AdvancePipeline()
@@ -568,23 +656,25 @@ namespace PathDrawer.Runtime
         private void UpdateTelemetry()
         {
             _lastTelemetryTime = Time.unscaledTime + TelemetryRefreshInterval;
-            if (telemetryText == null) return;
 
             float totalLength = _physics != null ? _physics.TotalLength : 0f;
             float reachableLength = _physics != null ? _physics.ReachableDistance : 0f;
             bool blocked = _physics != null && _physics.IsBlocked;
             _telemetryBuilder.Clear();
-            _telemetryBuilder.Append(autoShowcase ? "Mode: LIVE AUTO" : mode == TrajectoryMode.SplineTerrain ? "Mode: SPLINE TERRAIN" : "Mode: BALLISTIC ARC");
-            _telemetryBuilder.Append("  |  LMB Draw  |  S/B Mode  |  Space Arc\n");
-            _telemetryBuilder.Append("Samples: ").Append(_lastRawPointCount)
-                .Append(" raw > ").Append(_lastRdpPointCount).Append(" RDP > ")
-                .Append(_lastGeometryOutputCount).Append(" LUT points\n");
-            _telemetryBuilder.Append("Length: ").Append(totalLength.ToString("F1", CultureInfo.InvariantCulture))
-                .Append(" m | Reachable: ").Append(reachableLength.ToString("F1", CultureInfo.InvariantCulture))
-                .Append(" m | ").Append(blocked ? "BLOCKED AT OBSTACLE" : "CLEAR").Append("\n");
-            _telemetryBuilder.Append("Pipeline: ").Append(_lastPipelineMicroseconds.ToString("F0", CultureInfo.InvariantCulture))
-                .Append(" µs | Main-thread GC: 0 B (pipeline)");
-            telemetryText.text = _telemetryBuilder.ToString();
+            _telemetryBuilder.Append("<color=#8FEFFF>MODE</color>  ")
+                .Append(mode == TrajectoryMode.SplineTerrain ? "SPLINE TERRAIN" : "BALLISTIC ARC")
+                .Append(autoShowcase ? "  |  LIVE SHOWCASE\n" : "  |  POINTER INPUT\n");
+            _telemetryBuilder.Append("<color=#8FEFFF>SAMPLES</color>  ").Append(_lastRawPointCount)
+                .Append(" RAW  →  ").Append(_lastRdpPointCount).Append(" RDP  →  ")
+                .Append(_lastGeometryOutputCount).Append(" LUT VERTICES\n");
+            _telemetryBuilder.Append("<color=#8FEFFF>LENGTH</color>  ").Append(totalLength.ToString("F1", CultureInfo.InvariantCulture))
+                .Append(" m TOTAL  |  ").Append(reachableLength.ToString("F1", CultureInfo.InvariantCulture))
+                .Append(" m REACHABLE  |  ").Append(blocked ? "<color=#FF4D6D>BLOCKED</color>" : "CLEAR").Append('\n');
+            _telemetryBuilder.Append("<color=#8FEFFF>BURST STEP</color>  ")
+                .Append(_lastPipelineMicroseconds.ToString("F0", CultureInfo.InvariantCulture))
+                .Append(" µs  |  0 B MANAGED GC\n");
+            _telemetryBuilder.Append("<color=#E0FFFF>CONTROLS</color>  LMB DRAW  |  S SPLINE  |  B BALLISTIC  |  SPACE ARC  |  R RESET");
+            if (telemetryText != null) telemetryText.text = _telemetryBuilder.ToString();
         }
 
 #if UNITY_EDITOR

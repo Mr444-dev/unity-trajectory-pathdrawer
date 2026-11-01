@@ -26,7 +26,7 @@ namespace PathDrawer.Editor
         private const string ScreenshotFrameKey = "PathDrawer.Screenshot.StartFrame";
         private const string ObstacleLayerName = "PathDrawerObstacles";
         private const float TerrainTop = 0f;
-        private const float PlateauTop = 1.4f;
+        private const float PlateauTop = 1.2f;
 
         static PathDrawerPortfolioTools()
         {
@@ -54,15 +54,17 @@ namespace PathDrawer.Editor
             Material terrainMaterial = LoadOrCreateMaterial(
                 $"{MaterialFolder}/TacticalArenaGrid.mat", "PathDrawer/TacticalArenaGrid", new Color(0.035f, 0.055f, 0.09f, 1f));
             Material reachableMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/ReachablePath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.02f, 2.3f, 2.45f, 0.92f));
+                $"{MaterialFolder}/ReachablePath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.02f, 2.4f, 2.08f, 0.96f));
+            Material reachableCoreMaterial = LoadOrCreateMaterial(
+                $"{MaterialFolder}/ReachableLineCore.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.88f, 1f, 1f, 1f));
             Material blockedMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/BlockedPath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.8f, 0.055f, 0.08f, 0.95f));
+                $"{MaterialFolder}/BlockedPath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.5f, 0.416f, 0.824f, 1f));
             Material goldMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/BallisticArc.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.4f, 1.05f, 0.025f, 0.96f));
+                $"{MaterialFolder}/BallisticArc.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.5f, 1.79f, 0.03f, 1f));
             Material hazardMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/HazardEmission.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.8f, 0.09f, 0.16f, 0.98f));
+                $"{MaterialFolder}/HazardEmission.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.5f, 0.416f, 0.824f, 1f));
             Material waypointMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/WaypointEmission.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.02f, 2.2f, 2.3f, 0.95f));
+                $"{MaterialFolder}/WaypointEmission.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.02f, 2.4f, 2.08f, 1f));
             Material monolithMaterial = LoadOrCreateLitMaterial(
                 $"{MaterialFolder}/MonolithGunmetal.mat", new Color(0.055f, 0.075f, 0.12f), 0.78f, 0.82f);
             Material bandMaterial = LoadOrCreateMaterial(
@@ -76,14 +78,15 @@ namespace PathDrawer.Editor
             CreateLightingAndCamera(out Camera camera);
             CreateGlobalPostProcessing();
 
-            LineRenderer reachableLine = CreateLine("Reachable Trajectory", reachableMaterial, 0.11f);
-            LineRenderer blockedLine = CreateLine("Blocked Trajectory", blockedMaterial, 0.13f);
-            LineRenderer ballisticLine = CreateLine("Ballistic Arc Preview", goldMaterial, 0.075f);
-            LineRenderer impactBeacon = CreateLine("Obstacle Impact Laser", hazardMaterial, 0.06f);
+            LineRenderer reachableLine = CreateLine("Reachable Trajectory Core", reachableCoreMaterial, 0.14f);
+            LineRenderer blockedLine = CreateLine("Blocked Trajectory", blockedMaterial, 0.22f);
+            LineRenderer ballisticLine = CreateLine("Ballistic Arc Preview", goldMaterial, 0.18f);
+            LineRenderer impactBeacon = CreateLine("Obstacle Impact Laser", hazardMaterial, 0.075f);
             MeshFilter reachableRibbon = CreateRibbon("Reachable Hologram Ribbon", reachableMaterial);
             MeshFilter blockedRibbon = CreateRibbon("Blocked Hologram Ribbon", blockedMaterial);
             Transform[] waypointMarkers = CreateWaypointMarkers(ringMesh, waypointMaterial, 24);
             Transform impactRing = CreateRingObject("Obstacle Impact Ring", ringMesh, hazardMaterial).transform;
+            impactRing.localScale = Vector3.one * 1.9f;
             impactRing.gameObject.SetActive(false);
 
             var controllerObject = new GameObject("PathDrawer Demo Controller");
@@ -104,8 +107,9 @@ namespace PathDrawer.Editor
             SetInteger(serializedController, "maxOutputPoints", 4096);
             SetInteger(serializedController, "lookupSamplesPerSegment", 16);
             SetFloat(serializedController, "outputSpacing", 0.2f);
-            SetFloat(serializedController, "ribbonWidth", 0.45f);
-            SetInteger(serializedController, "showcaseRawPointCount", 120);
+            SetFloat(serializedController, "ribbonWidth", 0.55f);
+            SetFloat(serializedController, "surfaceOffset", 0.06f);
+            SetInteger(serializedController, "showcaseRawPointCount", 140);
             SetBoolean(serializedController, "autoShowcase", true);
             SetBoolean(serializedController, "showBallisticPreview", true);
             serializedController.ApplyModifiedPropertiesWithoutUndo();
@@ -176,6 +180,8 @@ namespace PathDrawer.Editor
                 GameObject controllerObject = GameObject.Find("PathDrawer Demo Controller");
                 PathDrawerDemoController controller = controllerObject != null ? controllerObject.GetComponent<PathDrawerDemoController>() : null;
                 if (controller == null) throw new InvalidOperationException("PathDrawerDemoController was not found. Build the SampleScene before capturing.");
+                controller.RebuildNow();
+                AssertScreenshotReady(controller);
                 string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
                 string screenshotPath = Path.Combine(projectRoot, "docs", "screenshots", "pathdrawer-game-view.png");
                 controller.Capture1080pScreenshot(screenshotPath);
@@ -190,6 +196,36 @@ namespace PathDrawer.Editor
                 SessionState.SetBool(ScreenshotPendingKey, false);
                 EditorApplication.isPlaying = false;
             }
+        }
+
+        private static void AssertScreenshotReady(PathDrawerDemoController controller)
+        {
+            MeshFilter ribbonFilter = controller.ReachableRibbonMeshFilter;
+            Mesh ribbon = ribbonFilter != null ? ribbonFilter.sharedMesh : null;
+            LineRenderer reachable = controller.ReachableLineRenderer;
+            LineRenderer blocked = controller.BlockedLineRenderer;
+            LineRenderer ballistic = controller.BallisticLineRenderer;
+
+            if (ribbon == null || ribbon.vertexCount <= 40)
+                throw new InvalidOperationException($"Screenshot rejected: reachable ribbon has {ribbon?.vertexCount ?? 0} vertices; expected > 40.");
+            MeshRenderer ribbonRenderer = ribbonFilter.GetComponent<MeshRenderer>();
+            if (ribbonRenderer == null || !ribbonRenderer.enabled)
+                throw new InvalidOperationException("Screenshot rejected: reachable ribbon MeshRenderer is missing or disabled.");
+            if (reachable == null || !reachable.enabled || reachable.positionCount <= 10)
+                throw new InvalidOperationException($"Screenshot rejected: reachable LineRenderer has {reachable?.positionCount ?? 0} positions or is disabled; expected > 10.");
+            if (blocked == null || !blocked.enabled || blocked.positionCount <= 2)
+                throw new InvalidOperationException($"Screenshot rejected: blocked LineRenderer has {blocked?.positionCount ?? 0} positions or is disabled; expected > 2.");
+            if (ballistic == null || !ballistic.enabled || ballistic.positionCount <= 10)
+                throw new InvalidOperationException($"Screenshot rejected: ballistic LineRenderer has {ballistic?.positionCount ?? 0} positions or is disabled; expected > 10.");
+            if (string.IsNullOrEmpty(controller.TelemetryText))
+                throw new InvalidOperationException("Screenshot rejected: telemetry text is missing.");
+
+            int hudLineCount = 1;
+            string telemetry = controller.TelemetryText;
+            for (int i = 0; i < telemetry.Length; i++)
+                if (telemetry[i] == '\n') hudLineCount++;
+            if (hudLineCount != 5)
+                throw new InvalidOperationException($"Screenshot rejected: live HUD has {hudLineCount} lines; expected five detail lines.");
         }
 
         private static int EnsureObstacleLayer()
@@ -238,22 +274,41 @@ namespace PathDrawer.Editor
             floor.GetComponent<MeshRenderer>().sharedMaterial = material;
 
             GameObject plateau = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            plateau.name = "Elevated Tactical Plateau — 1.4m";
+            plateau.name = "Elevated Tactical Plateau — 1.2m";
             plateau.transform.position = new Vector3(-1.2f, PlateauTop - 0.16f, -0.1f);
             plateau.transform.localScale = new Vector3(7f, 0.32f, 5.8f);
             plateau.GetComponent<MeshRenderer>().sharedMaterial = material;
 
-            CreateRamp("Entry Ramp — climb to plateau", new Vector3(-5.8f, 0.7f, -4.7f), new Vector3(3.4f, 1.4f, 4.2f), 3.8f, 5.55f, material);
-            CreateRamp("Exit Ramp — descend to impact lane", new Vector3(3.1f, 0.7f, 2.5f), new Vector3(2.2f, -1.4f, 1.4f), 3.5f, 2.9f, material);
+            CreateRamp("Entry Ramp — cardinal X ascent", new Vector3(-9.5f, TerrainTop, -0.1f), new Vector3(-4.7f, PlateauTop, -0.1f), 6.2f, material);
+            CreateRamp("Exit Ramp — cardinal X descent", new Vector3(7.5f, TerrainTop, -0.1f), new Vector3(2.3f, PlateauTop, -0.1f), 6.2f, material);
         }
 
-        private static void CreateRamp(string name, Vector3 center, Vector3 direction, float width, float length, Material material)
+        private static void CreateRamp(string name, Vector3 groundEndpoint, Vector3 plateauEndpoint, float width, Material material)
         {
+            const float thickness = 0.32f;
+            Vector3 horizontal = new Vector3(plateauEndpoint.x - groundEndpoint.x, 0f, plateauEndpoint.z - groundEndpoint.z);
+            float horizontalLength = horizontal.magnitude;
+            if (horizontalLength <= 0.001f) throw new ArgumentException("Ramp endpoints must be separated on the X/Z plane.", nameof(plateauEndpoint));
+            if (Mathf.Abs(horizontal.x) > 0.001f && Mathf.Abs(horizontal.z) > 0.001f)
+                throw new ArgumentException("Portfolio ramps must follow a cardinal X or Z axis.", nameof(plateauEndpoint));
+
+            Vector3 forward = horizontal / horizontalLength;
+            float rise = plateauEndpoint.y - groundEndpoint.y;
+            float pitch = Mathf.Atan2(rise, horizontalLength);
+            float length = Mathf.Sqrt(horizontalLength * horizontalLength + rise * rise);
+            Quaternion yaw = Quaternion.LookRotation(forward, Vector3.up);
+            Quaternion rotation = yaw * Quaternion.AngleAxis(-pitch * Mathf.Rad2Deg, Vector3.right);
+            float halfThickness = thickness * 0.5f;
+            Vector3 midpoint = (groundEndpoint + plateauEndpoint) * 0.5f;
+            Vector3 center = midpoint
+                - Vector3.up * (halfThickness * Mathf.Cos(pitch))
+                + forward * (halfThickness * Mathf.Sin(pitch));
+
             GameObject ramp = GameObject.CreatePrimitive(PrimitiveType.Cube);
             ramp.name = name;
             ramp.transform.position = center;
-            ramp.transform.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
-            ramp.transform.localScale = new Vector3(width, 0.32f, length);
+            ramp.transform.rotation = rotation;
+            ramp.transform.localScale = new Vector3(width, thickness, length);
             ramp.GetComponent<MeshRenderer>().sharedMaterial = material;
         }
 
@@ -367,7 +422,7 @@ namespace PathDrawer.Editor
             for (int i = 0; i < markers.Length; i++)
             {
                 GameObject marker = CreateRingObject($"RDP Waypoint {i + 1:00}", ringMesh, material);
-                marker.transform.localScale = Vector3.one * 0.86f;
+                marker.transform.localScale = Vector3.one * 0.95f;
                 marker.SetActive(false);
                 markers[i] = marker.transform;
             }
@@ -409,7 +464,7 @@ namespace PathDrawer.Editor
             borderRect.anchorMax = new Vector2(0f, 1f);
             borderRect.pivot = new Vector2(0f, 1f);
             borderRect.anchoredPosition = new Vector2(14f, -14f);
-            borderRect.sizeDelta = new Vector2(330f, 126f);
+            borderRect.sizeDelta = new Vector2(520f, 144f);
             border.GetComponent<Image>().color = new Color(0.169f, 0.357f, 0.518f, 0.96f);
 
             var panel = new GameObject("Telemetry Panel", typeof(RectTransform), typeof(Image));
@@ -432,7 +487,7 @@ namespace PathDrawer.Editor
             titleRect.sizeDelta = new Vector2(-20f, 20f);
             Text title = titleObject.GetComponent<Text>();
             title.font = font;
-            title.fontSize = 13;
+            title.fontSize = 14;
             title.fontStyle = FontStyle.Bold;
             title.text = "PATHDRAWER  |  UNITY 6  •  BURST + JOBS";
             title.color = new Color(0.56f, 0.88f, 1f, 1f);
@@ -444,13 +499,14 @@ namespace PathDrawer.Editor
             RectTransform detailRect = detailObject.GetComponent<RectTransform>();
             detailRect.anchorMin = new Vector2(0f, 0f);
             detailRect.anchorMax = new Vector2(1f, 1f);
-            detailRect.offsetMin = new Vector2(10f, 7f);
-            detailRect.offsetMax = new Vector2(-10f, -28f);
+            detailRect.offsetMin = new Vector2(12f, 8f);
+            detailRect.offsetMax = new Vector2(-12f, -30f);
             Text detail = detailObject.GetComponent<Text>();
             detail.font = font;
             detail.fontSize = 12;
             detail.lineSpacing = 1.05f;
             detail.alignment = TextAnchor.UpperLeft;
+            detail.supportRichText = true;
             detail.horizontalOverflow = HorizontalWrapMode.Overflow;
             detail.verticalOverflow = VerticalWrapMode.Truncate;
             detail.color = new Color(0.78f, 0.87f, 0.96f, 1f);
