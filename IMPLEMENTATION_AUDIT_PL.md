@@ -28,7 +28,7 @@ Walidacja granic odrzuca nadmiarowe `LookupSegments` przed planowaniem jobów i 
 
 ## Testy i pomiary
 
-W Unity Test Runner, w trybie EditMode, uruchomiono wszystkie **7 testów: 7 passed, 0 failed, 0 ignored**. Wśród nich są testy redukcji RDP z zachowaniem końców, interpolacji spline i ostrych zakrętów, równomiernego dystansu, walidacji zakresów oraz test alokacji.
+Przed odłączeniem nazw assembly i namespace od wcześniejszego kontenera w Unity Test Runner uruchomiono wszystkie **7 testów: 7 passed, 0 failed, 0 ignored**. Wśród nich są testy redukcji RDP z zachowaniem końców, interpolacji spline i ostrych zakrętów, równomiernego dystansu, walidacji zakresów oraz test alokacji. Po zmianie nazw assembly należy powtórzyć suite po otwarciu checkoutu z nowej lokalizacji.
 
 `FullPipelineFrameLoop_AllocatesZeroManagedBytesAfterWarmup` wykonał 500 rozgrzanych iteracji połączonych etapów wejścia, geometrii i generowania ribbonu z asercją `GC.GetAllocatedBytesForCurrentThread()`. Wynik testu: **0 B zarządzanej alokacji** w mierzonym zakresie testu. Nie jest to pomiar wszystkich ścieżek Unity, zapytań fizyki, renderowania GPU ani dowolnego kodu integrującego.
 
@@ -49,7 +49,7 @@ Zakres pomiaru obejmuje RDP, spline/LUT, resampling, alokację writable `MeshDat
 3. Otwórz `Window > General > Test Runner`, wybierz EditMode i uruchom wszystkie testy.
 4. Uruchom `Tools > PathDrawer > 2. Run Benchmark Sweep & Export Markdown`, aby wykonać serię benchmarków i odświeżyć tabelę.
 
-GUI potwierdziło, że scena i narzędzie benchmarku działają, a konsola nie zgłaszała błędów po tych operacjach. Próba przeciągnięcia wskaźnika nie pokazała narysowanej ścieżki, dlatego interakcję runtime należy potwierdzić ręcznie po otwarciu projektu z docelowego katalogu.
+GUI potwierdziło, że scena i narzędzie benchmarku działają, a konsola nie zgłaszała błędów po tych operacjach. Po zmianie namespace/assembly GUI testów nie powtórzono. Wygenerowane projekty C# zbudowały się po tych zmianach bez błędów; dwa ostrzeżenia dotyczyły konfliktu wersji `System.Numerics.Vectors` w referencjach edytora. Próba przeciągnięcia wskaźnika nie pokazała narysowanej ścieżki, dlatego interakcję runtime należy potwierdzić ręcznie po otwarciu projektu z docelowego katalogu.
 
 ## Stan repozytorium
 

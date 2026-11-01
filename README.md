@@ -99,6 +99,8 @@ The guarantee depends on these operating rules:
 
 ## Setup and use
 
+Open the repository root (`unity-trajectory-pathdrawer`) in Unity Hub with Unity `6000.6.3f1`; the default project scene is `Assets/Scenes/SampleScene.unity`.
+
 The manifest directly references Burst, Collections, and Mathematics at the versions resolved by this Unity 6 project. The project uses URP 17.6.0. Create two LineRenderers if you want reachable/blocked coloring; the blocked renderer is optional.
 
 ```csharp
