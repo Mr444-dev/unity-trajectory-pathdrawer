@@ -48,7 +48,10 @@ namespace PathDrawer.Runtime
         [SerializeField] private MeshFilter blockedRibbonMeshFilter;
         [SerializeField] private Transform[] waypointMarkers = Array.Empty<Transform>();
         [SerializeField] private Transform impactRing;
+        [SerializeField] private Transform[] ballisticTickMarkers = Array.Empty<Transform>();
+        [SerializeField] private Transform ballisticLandingReticle;
         [SerializeField] private Text telemetryText;
+        [SerializeField] private Canvas captureHudCanvas;
 
         [Header("Input and geometry")]
         [SerializeField, Min(16)] private int maxInputPoints = 1024;
@@ -101,6 +104,7 @@ namespace PathDrawer.Runtime
         private bool _isDragging;
         private bool _pipelineTimingActive;
         private bool _pipelineCompletedThisFrame;
+        private bool _ignorePointerGesture;
         private TrajectoryMode _scheduledMode;
         private int _lastRawPointCount;
         private int _lastRdpPointCount;
@@ -111,9 +115,14 @@ namespace PathDrawer.Runtime
         private float _lastTelemetryTime;
         private long _pipelineCpuTicks;
         private long _frameStartTicks;
+        private string _telemetrySnapshot = string.Empty;
         private readonly StringBuilder _telemetryBuilder = new(384);
-        private float3 _showcaseStart = new(-7.5f, 0f, -6.5f);
-        private float3 _showcaseEnd = new(7.5f, 0f, 6f);
+        private float3 _showcaseStart = new(-10f, 0f, -7.5f);
+        private float3 _showcaseEnd = new(9f, 0f, 7.5f);
+        private static GUIStyle _hudTitleStyle;
+        private static GUIStyle _hudDetailsStyle;
+        private static GUIStyle _hudButtonStyle;
+        private static bool _hudStylesReady;
 
         public TrajectoryMode CurrentMode => mode;
         public bool IsAutoShowcase => autoShowcase;
@@ -122,7 +131,7 @@ namespace PathDrawer.Runtime
         public LineRenderer BlockedLineRenderer => blockedLine;
         public LineRenderer BallisticLineRenderer => ballisticArcLine;
         public MeshFilter ReachableRibbonMeshFilter => ribbonMeshFilter;
-        public string TelemetryText => telemetryText != null ? telemetryText.text : string.Empty;
+        public string TelemetryText => telemetryText != null ? telemetryText.text : _telemetrySnapshot;
 
         private void Awake()
         {
@@ -170,6 +179,7 @@ namespace PathDrawer.Runtime
             if (ballisticArcLine != null) ballisticArcLine.enabled = showBallisticPreview;
             if (impactRing != null) impactRing.gameObject.SetActive(false);
             if (impactBeacon != null) impactBeacon.enabled = false;
+            if (captureHudCanvas != null) captureHudCanvas.enabled = false;
             if (_blockedRibbonRenderer != null) _blockedRibbonRenderer.enabled = false;
             mode = TrajectoryMode.SplineTerrain;
         }
@@ -283,11 +293,24 @@ namespace PathDrawer.Runtime
 
             if (pressed)
             {
+                Vector2 guiPosition = new(screenPosition.x, Screen.height - screenPosition.y);
+                if (HudPanelRect.Contains(guiPosition))
+                {
+                    _ignorePointerGesture = true;
+                    return;
+                }
+                _ignorePointerGesture = false;
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
                 autoShowcase = false;
                 _input.Clear();
                 _isDragging = true;
                 _needsRebuild = false;
+            }
+
+            if (_ignorePointerGesture)
+            {
+                if (released) _ignorePointerGesture = false;
+                return;
             }
 
             if (_isDragging && (held || released) && TryRaycastGround(screenPosition, out float3 worldPosition))
@@ -345,23 +368,24 @@ namespace PathDrawer.Runtime
         {
             Span<float3> controls = stackalloc float3[ShowcaseControlCount]
             {
-                new float3(-7.5f, 0f, -6.5f),
-                new float3(-5.7f, 0.1f, -4.7f),
-                new float3(-4f, 0.55f, -2.5f),
-                new float3(-2f, 1.2f, -1f),
-                new float3(-0.9f, 1.2f, 0.15f),
-                new float3(-0.15f, 1.2f, 1.15f),
-                new float3(1.2f, 1.2f, 2.3f),
-                new float3(2.8f, 0.85f, 3f),
-                new float3(4.2f, 0.05f, 3.2f),
-                new float3(7.5f, 0.05f, 6f)
+                TerrainPoint(-10f, -7.5f),
+                TerrainPoint(-7.4f, -6f),
+                TerrainPoint(-4.5f, -3.6f),
+                TerrainPoint(-2f, -2.3f),
+                TerrainPoint(-0.4f, -1.7f),
+                TerrainPoint(1.4f, -0.8f),
+                TerrainPoint(3f, 1.2f),
+                TerrainPoint(4.5f, 3.1f),
+                TerrainPoint(5.5f, 4.3f),
+                TerrainPoint(9f, 7.5f)
             };
 
             float breathe = math.sin(time * 0.55f) * showcaseBreathingAmplitude;
             for (int i = 2; i <= 7; i++)
             {
                 float envelope = math.sin((i - 1f) * math.PI / (ShowcaseControlCount - 1f));
-                controls[i] += new float3(0f, 0f, breathe * envelope);
+                controls[i].z += breathe * envelope;
+                controls[i].y = PathDrawerTerrainProfile.EvaluateHeight(controls[i].x, controls[i].z) + 0.04f;
             }
 
             _showcaseStart = controls[0];
@@ -389,12 +413,12 @@ namespace PathDrawer.Runtime
             if (!showBallisticPreview)
             {
                 _ballisticAdapter.Apply(_ballisticGeometry.Positions, 0);
+                SetBallisticMarkersVisible(false);
                 return;
             }
 
-            float gravityMagnitude = math.max(0.1f, math.abs(ballisticGravity.y));
             float duration = math.max(0.5f, ballisticDuration);
-            float verticalSpeed = gravityMagnitude * duration * 0.5f;
+            float verticalSpeed = (end.y - start.y - 0.5f * ballisticGravity.y * duration * duration) / duration;
             float3 horizontalDelta = new float3(end.x - start.x, 0f, end.z - start.z);
             float3 initialVelocity = horizontalDelta / duration + new float3(0f, verticalSpeed, 0f);
             var settings = new BallisticTrajectorySettings(
@@ -406,6 +430,7 @@ namespace PathDrawer.Runtime
                 BallisticLookupSegments);
             _ballisticGeometry.RebuildBallistic(settings, 0.16f).Complete();
             _ballisticAdapter.Apply(_ballisticGeometry.Positions, _ballisticGeometry.Count);
+            UpdateBallisticMarkers();
         }
 
         private void RebuildCurrentTrajectory()
@@ -434,7 +459,7 @@ namespace PathDrawer.Runtime
                 float3 destination = _simplifiedControls[_lastRdpPointCount - 1];
                 float3 horizontal = new float3(destination.x - origin.x, 0f, destination.z - origin.z);
                 float duration = math.max(0.1f, ballisticDuration);
-                float verticalSpeed = math.abs(ballisticGravity.y) * duration * 0.5f;
+                float verticalSpeed = (destination.y - origin.y - 0.5f * ballisticGravity.y * duration * duration) / duration;
                 var settings = new BallisticTrajectorySettings(
                     origin,
                     horizontal / duration + new float3(0f, verticalSpeed, 0f),
@@ -606,7 +631,7 @@ namespace PathDrawer.Runtime
                 float3 destination = _simplifiedControls[_lastRdpPointCount - 1];
                 float3 horizontal = new float3(destination.x - origin.x, 0f, destination.z - origin.z);
                 float duration = math.max(0.1f, ballisticDuration);
-                float verticalSpeed = math.abs(ballisticGravity.y) * duration * 0.5f;
+                float verticalSpeed = (destination.y - origin.y - 0.5f * ballisticGravity.y * duration * duration) / duration;
                 float3 initialVelocity = horizontal / duration + new float3(0f, verticalSpeed, 0f);
                 var settings = new BallisticTrajectorySettings(
                     origin,
@@ -673,9 +698,138 @@ namespace PathDrawer.Runtime
             _telemetryBuilder.Append("<color=#8FEFFF>BURST STEP</color>  ")
                 .Append(_lastPipelineMicroseconds.ToString("F0", CultureInfo.InvariantCulture))
                 .Append(" µs  |  0 B MANAGED GC\n");
-            _telemetryBuilder.Append("<color=#E0FFFF>CONTROLS</color>  LMB DRAW  |  S SPLINE  |  B BALLISTIC  |  SPACE ARC  |  R RESET");
-            if (telemetryText != null) telemetryText.text = _telemetryBuilder.ToString();
+            _telemetryBuilder.Append("<color=#E0FFFF>CONTROLS</color>  LMB · S SPLINE · B BALLISTIC · SPACE ARC · R RESET");
+            _telemetrySnapshot = _telemetryBuilder.ToString();
+            if (telemetryText != null) telemetryText.text = _telemetrySnapshot;
         }
+
+        private void OnGUI()
+        {
+            EnsureHudStyles();
+            Rect panel = HudPanelRect;
+            Color previous = GUI.color;
+            GUI.color = new Color32(26, 34, 44, 244);
+            GUI.DrawTexture(panel, Texture2D.whiteTexture);
+            GUI.color = new Color32(68, 83, 99, 255);
+            GUI.DrawTexture(new Rect(panel.x, panel.y, panel.width, 1f), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(panel.x, panel.yMax - 1f, panel.width, 1f), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(panel.x, panel.y, 1f, panel.height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(panel.xMax - 1f, panel.y, 1f, panel.height), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            GUI.Label(new Rect(panel.x + 10f, panel.y + 7f, panel.width - 20f, 20f),
+                "PATHDRAWER  |  UNITY 6  •  BURST + JOBS", _hudTitleStyle);
+            GUI.Label(new Rect(panel.x + 10f, panel.y + 30f, panel.width - 20f, 82f),
+                TelemetryText, _hudDetailsStyle);
+
+            float buttonWidth = 174f;
+            float buttonHeight = 19f;
+            float left = panel.x + 10f;
+            float right = panel.x + 196f;
+            float rowOne = panel.y + 112f;
+            float rowTwo = panel.y + 136f;
+            if (GUI.Button(new Rect(left, rowOne, buttonWidth, buttonHeight), "Spline Mode", _hudButtonStyle))
+                UseSplineTerrainMode();
+            if (GUI.Button(new Rect(right, rowOne, buttonWidth, buttonHeight), "Ballistic Mode", _hudButtonStyle))
+                UseBallisticArcMode();
+            if (GUI.Button(new Rect(left, rowTwo, buttonWidth, buttonHeight),
+                    showBallisticPreview ? "Arc Preview: ON" : "Arc Preview: OFF", _hudButtonStyle))
+                ToggleArcPreview();
+            if (GUI.Button(new Rect(right, rowTwo, buttonWidth, buttonHeight),
+                    autoShowcase ? "Auto-Showcase: ON" : "Auto-Showcase: OFF", _hudButtonStyle))
+                ToggleAutoShowcase();
+
+            GUI.color = previous;
+        }
+
+        private static Rect HudPanelRect => new(14f, 14f, 380f, 168f);
+
+        private static void EnsureHudStyles()
+        {
+            if (_hudStylesReady) return;
+            _hudTitleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                fontStyle = FontStyle.Bold,
+                richText = false,
+                normal = { textColor = new Color32(172, 226, 232, 255) }
+            };
+            _hudDetailsStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                richText = true,
+                wordWrap = false,
+                clipping = TextClipping.Clip,
+                normal = { textColor = new Color32(218, 226, 233, 255) }
+            };
+            _hudButtonStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                richText = false
+            };
+            _hudStylesReady = true;
+        }
+
+        private void ToggleArcPreview()
+        {
+            showBallisticPreview = !showBallisticPreview;
+            if (ballisticArcLine != null) ballisticArcLine.enabled = showBallisticPreview;
+            RebuildBallisticPreview(_showcaseStart, _showcaseEnd);
+        }
+
+        private void ToggleAutoShowcase()
+        {
+            if (autoShowcase)
+            {
+                autoShowcase = false;
+                return;
+            }
+            ResumeAutoShowcase();
+            RebuildCurrentTrajectory();
+        }
+
+        private void UpdateBallisticMarkers()
+        {
+            if (_ballisticGeometry == null || _ballisticGeometry.Count < 2)
+            {
+                SetBallisticMarkersVisible(false);
+                return;
+            }
+
+            int markerCount = ballisticTickMarkers != null ? ballisticTickMarkers.Length : 0;
+            for (int i = 0; i < markerCount; i++)
+            {
+                Transform marker = ballisticTickMarkers[i];
+                if (marker == null) continue;
+                int index = math.clamp((i + 1) * (_ballisticGeometry.Count - 1) / (markerCount + 1), 0, _ballisticGeometry.Count - 1);
+                marker.position = _ballisticGeometry.Positions[index] + new float3(0f, 0.08f, 0f);
+                if (!marker.gameObject.activeSelf) marker.gameObject.SetActive(true);
+            }
+            if (ballisticLandingReticle != null)
+            {
+                ballisticLandingReticle.position = _ballisticGeometry.Positions[_ballisticGeometry.Count - 1] + new float3(0f, 0.025f, 0f);
+                if (!ballisticLandingReticle.gameObject.activeSelf) ballisticLandingReticle.gameObject.SetActive(true);
+            }
+        }
+
+        private void SetBallisticMarkersVisible(bool visible)
+        {
+            if (ballisticTickMarkers != null)
+            {
+                for (int i = 0; i < ballisticTickMarkers.Length; i++)
+                {
+                    Transform marker = ballisticTickMarkers[i];
+                    if (marker != null && marker.gameObject.activeSelf != visible) marker.gameObject.SetActive(visible);
+                }
+            }
+            if (ballisticLandingReticle != null && ballisticLandingReticle.gameObject.activeSelf != visible)
+                ballisticLandingReticle.gameObject.SetActive(visible);
+        }
+
+        private static float3 TerrainPoint(float x, float z) =>
+            new(x, PathDrawerTerrainProfile.EvaluateHeight(x, z) + 0.04f, z);
 
 #if UNITY_EDITOR
         /// <summary>Captures the active camera and ScreenSpaceCamera HUD at an exact 1080p output size.</summary>
@@ -695,9 +849,11 @@ namespace PathDrawer.Runtime
             target.Create();
             RenderTexture previousTarget = drawCamera.targetTexture;
             RenderTexture previousActive = RenderTexture.active;
+            bool previousHudEnabled = captureHudCanvas != null && captureHudCanvas.enabled;
             Texture2D capture = null;
             try
             {
+                if (captureHudCanvas != null) captureHudCanvas.enabled = true;
                 drawCamera.targetTexture = target;
                 drawCamera.Render();
                 RenderTexture.active = target;
@@ -712,6 +868,7 @@ namespace PathDrawer.Runtime
             }
             finally
             {
+                if (captureHudCanvas != null) captureHudCanvas.enabled = previousHudEnabled;
                 drawCamera.targetTexture = previousTarget;
                 RenderTexture.active = previousActive;
                 target.Release();

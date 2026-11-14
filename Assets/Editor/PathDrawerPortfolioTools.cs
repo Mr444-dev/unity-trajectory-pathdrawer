@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using PathDrawer.Runtime;
 using UnityEditor;
+using UnityEditor.Build.Reporting;
 using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -12,6 +13,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using System.IO.Compression;
 
 namespace PathDrawer.Editor
 {
@@ -25,8 +27,7 @@ namespace PathDrawer.Editor
         private const string ScreenshotPendingKey = "PathDrawer.Screenshot.Pending";
         private const string ScreenshotFrameKey = "PathDrawer.Screenshot.StartFrame";
         private const string ObstacleLayerName = "PathDrawerObstacles";
-        private const float TerrainTop = 0f;
-        private const float PlateauTop = 1.2f;
+        private const int TerrainResolution = 80;
 
         static PathDrawerPortfolioTools()
         {
@@ -52,42 +53,47 @@ namespace PathDrawer.Editor
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             Material terrainMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/TacticalArenaGrid.mat", "PathDrawer/TacticalArenaGrid", new Color(0.035f, 0.055f, 0.09f, 1f));
+                $"{MaterialFolder}/TacticalArenaGrid.mat", "PathDrawer/TacticalArenaGrid", new Color(0.12f, 0.15f, 0.19f, 1f));
             Material reachableMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/ReachablePath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.02f, 2.4f, 2.08f, 0.96f));
-            Material reachableCoreMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/ReachableLineCore.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.88f, 1f, 1f, 1f));
+                $"{MaterialFolder}/ReachablePath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.051f, 0.58f, 0.54f, 0.82f));
+            Material reachableCoreMaterial = LoadOrCreateLitMaterial(
+                $"{MaterialFolder}/ReachableLineCore.mat", new Color(0.035f, 0.19f, 0.18f), 0f, 0.18f);
             Material blockedMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/BlockedPath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.5f, 0.416f, 0.824f, 1f));
-            Material goldMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/BallisticArc.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.5f, 1.79f, 0.03f, 1f));
-            Material hazardMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/HazardEmission.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.5f, 0.416f, 0.824f, 1f));
-            Material waypointMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/WaypointEmission.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.02f, 2.4f, 2.08f, 1f));
+                $"{MaterialFolder}/BlockedPath.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(0.937f, 0.267f, 0.267f, 0.75f));
+            blockedMaterial.SetColor("_ChevronColor", new Color(1f, 0.42f, 0.42f, 1f));
+            blockedMaterial.SetColor("_EdgeColor", new Color(0.40f, 0.075f, 0.09f, 1f));
+            EditorUtility.SetDirty(blockedMaterial);
+            Material goldMaterial = LoadOrCreateLitMaterial(
+                $"{MaterialFolder}/BallisticArc.mat", new Color(0.96f, 0.58f, 0.08f), 0f, 0.28f);
+            Material hazardMaterial = LoadOrCreateLitMaterial(
+                $"{MaterialFolder}/HazardEmission.mat", new Color(0.937f, 0.267f, 0.267f), 0f, 0.22f);
+            Material waypointMaterial = LoadOrCreateLitMaterial(
+                $"{MaterialFolder}/WaypointEmission.mat", new Color(0.08f, 0.58f, 0.54f), 0f, 0.16f);
             Material monolithMaterial = LoadOrCreateLitMaterial(
-                $"{MaterialFolder}/MonolithGunmetal.mat", new Color(0.055f, 0.075f, 0.12f), 0.78f, 0.82f);
-            Material bandMaterial = LoadOrCreateMaterial(
-                $"{MaterialFolder}/MonolithHazardBand.mat", "PathDrawer/TrajectoryRibbonHologram", new Color(2.1f, 0.62f, 0.04f, 1f));
+                $"{MaterialFolder}/MonolithGunmetal.mat", new Color(0.20f, 0.24f, 0.29f), 0.05f, 0.24f);
+            Material bandMaterial = LoadOrCreateLitMaterial(
+                $"{MaterialFolder}/MonolithHazardBand.mat", new Color(0.85f, 0.47f, 0.02f), 0f, 0.2f);
             Mesh ringMesh = CreateRingMeshAsset();
 
             CreateTerrain(terrainMaterial);
-            CreateObstacleMonolith("Monolith A — Plateau", new Vector3(0.75f, PlateauTop, 0.15f), obstacleLayer, monolithMaterial, bandMaterial);
-            CreateObstacleMonolith("Monolith B — Impact Target", new Vector3(4.2f, TerrainTop, 3.2f), obstacleLayer, monolithMaterial, hazardMaterial);
-            CreateObstacleMonolith("Monolith C — Perimeter", new Vector3(-6.4f, TerrainTop, 2.5f), obstacleLayer, monolithMaterial, bandMaterial);
+            CreateObstacleMonolith("Obstacle 1 — Ridge Bypass", TerrainBasePosition(-0.1f, 0.1f), obstacleLayer, monolithMaterial, bandMaterial);
+            CreateObstacleMonolith("Obstacle 2 — Impact Target", TerrainBasePosition(5.5f, 4.3f), obstacleLayer, monolithMaterial, bandMaterial);
+            CreateObstacleMonolith("Obstacle 3 — Perimeter", TerrainBasePosition(-6.2f, 2.7f), obstacleLayer, monolithMaterial, bandMaterial);
             CreateLightingAndCamera(out Camera camera);
             CreateGlobalPostProcessing();
 
-            LineRenderer reachableLine = CreateLine("Reachable Trajectory Core", reachableCoreMaterial, 0.14f);
-            LineRenderer blockedLine = CreateLine("Blocked Trajectory", blockedMaterial, 0.22f);
-            LineRenderer ballisticLine = CreateLine("Ballistic Arc Preview", goldMaterial, 0.18f);
-            LineRenderer impactBeacon = CreateLine("Obstacle Impact Laser", hazardMaterial, 0.075f);
-            MeshFilter reachableRibbon = CreateRibbon("Reachable Hologram Ribbon", reachableMaterial);
-            MeshFilter blockedRibbon = CreateRibbon("Blocked Hologram Ribbon", blockedMaterial);
+            LineRenderer reachableLine = CreateLine("Reachable Trajectory Edge", reachableCoreMaterial, 0.025f);
+            LineRenderer blockedLine = CreateLine("Blocked Trajectory", blockedMaterial, 0.12f);
+            LineRenderer ballisticLine = CreateLine("Ballistic Arc Preview", goldMaterial, 0.055f);
+            MeshFilter reachableRibbon = CreateRibbon("Reachable Teal Ribbon", reachableMaterial);
             Transform[] waypointMarkers = CreateWaypointMarkers(ringMesh, waypointMaterial, 24);
             Transform impactRing = CreateRingObject("Obstacle Impact Ring", ringMesh, hazardMaterial).transform;
-            impactRing.localScale = Vector3.one * 1.9f;
+            impactRing.localScale = Vector3.one * 3f;
             impactRing.gameObject.SetActive(false);
+            Transform[] ballisticTicks = CreateBallisticTicks(goldMaterial, 10);
+            Transform landingReticle = CreateRingObject("Ballistic Landing Reticle", ringMesh, goldMaterial).transform;
+            landingReticle.localScale = Vector3.one * 2.2f;
+            landingReticle.gameObject.SetActive(false);
 
             var controllerObject = new GameObject("PathDrawer Demo Controller");
             PathDrawerDemoController controller = controllerObject.AddComponent<PathDrawerDemoController>();
@@ -98,17 +104,19 @@ namespace PathDrawer.Editor
             SetReference(serializedController, "reachableLine", reachableLine);
             SetReference(serializedController, "blockedLine", blockedLine);
             SetReference(serializedController, "ballisticArcLine", ballisticLine);
-            SetReference(serializedController, "impactBeacon", impactBeacon);
+            SetReference(serializedController, "impactBeacon", null);
             SetReference(serializedController, "ribbonMeshFilter", reachableRibbon);
-            SetReference(serializedController, "blockedRibbonMeshFilter", blockedRibbon);
+            SetReference(serializedController, "blockedRibbonMeshFilter", null);
             SetReferences(serializedController, "waypointMarkers", waypointMarkers);
             SetReference(serializedController, "impactRing", impactRing);
+            SetReferences(serializedController, "ballisticTickMarkers", ballisticTicks);
+            SetReference(serializedController, "ballisticLandingReticle", landingReticle);
             SetInteger(serializedController, "maxInputPoints", 1024);
             SetInteger(serializedController, "maxOutputPoints", 4096);
             SetInteger(serializedController, "lookupSamplesPerSegment", 16);
             SetFloat(serializedController, "outputSpacing", 0.2f);
-            SetFloat(serializedController, "ribbonWidth", 0.55f);
-            SetFloat(serializedController, "surfaceOffset", 0.06f);
+            SetFloat(serializedController, "ribbonWidth", 0.42f);
+            SetFloat(serializedController, "surfaceOffset", 0.045f);
             SetInteger(serializedController, "showcaseRawPointCount", 140);
             SetBoolean(serializedController, "autoShowcase", true);
             SetBoolean(serializedController, "showBallisticPreview", true);
@@ -116,6 +124,7 @@ namespace PathDrawer.Editor
 
             Text telemetry = CreateTelemetryHud(camera);
             SetReference(serializedController, "telemetryText", telemetry);
+            SetReference(serializedController, "captureHudCanvas", telemetry != null ? telemetry.GetComponentInParent<Canvas>() : null);
             serializedController.ApplyModifiedPropertiesWithoutUndo();
 
             IncludeDemoSceneInBuildSettings();
@@ -146,6 +155,37 @@ namespace PathDrawer.Editor
             else
                 BeginScreenshotWarmup();
             Debug.Log("PathDrawer screenshot capture is armed. The editor will wait 60 Play Mode frames before saving docs/screenshots/pathdrawer-game-view.png.");
+        }
+
+        [MenuItem("Tools/PathDrawer/4. Build WebGL for itch.io (ZIP)")]
+        public static void BuildWebGlForItchIo()
+        {
+            if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.WebGL, BuildTarget.WebGL))
+                throw new InvalidOperationException("WebGL Build Support is not installed for this Unity Editor. Add the module in Unity Hub, then run this menu item again.");
+
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string buildDirectory = Path.Combine(projectRoot, "Builds", "WebGL-ItchIo");
+            string zipPath = Path.Combine(projectRoot, "Builds", "WebGL-ItchIo.zip");
+            Directory.CreateDirectory(Path.GetDirectoryName(buildDirectory));
+            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
+            PlayerSettings.WebGL.decompressionFallback = true;
+            PlayerSettings.defaultWebScreenWidth = 1280;
+            PlayerSettings.defaultWebScreenHeight = 720;
+
+            var options = new BuildPlayerOptions
+            {
+                scenes = Array.ConvertAll(Array.FindAll(EditorBuildSettings.scenes, scene => scene.enabled), scene => scene.path),
+                locationPathName = buildDirectory,
+                target = BuildTarget.WebGL,
+                options = BuildOptions.None
+            };
+            BuildReport report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result != BuildResult.Succeeded)
+                throw new InvalidOperationException($"WebGL build ended with {report.summary.result}; see the Unity Console for details.");
+
+            if (File.Exists(zipPath)) File.Delete(zipPath);
+            ZipFile.CreateFromDirectory(buildDirectory, zipPath, System.IO.Compression.CompressionLevel.Optimal, includeBaseDirectory: false);
+            Debug.Log($"WebGL build complete: {buildDirectory}; itch.io upload archive: {zipPath} ({new FileInfo(zipPath).Length:N0} bytes). index.html is at the ZIP root.");
         }
 
         private static void OnPlayModeStateChanged(PlayModeStateChange state)
@@ -267,72 +307,83 @@ namespace PathDrawer.Editor
 
         private static void CreateTerrain(Material material)
         {
-            GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            floor.name = "Tactical Arena — 24m Ground Plane";
-            floor.transform.position = new Vector3(0f, -0.2f, 0f);
-            floor.transform.localScale = new Vector3(24f, 0.4f, 24f);
-            floor.GetComponent<MeshRenderer>().sharedMaterial = material;
+            const int vertexCount = TerrainResolution * TerrainResolution;
+            const int triangleIndexCount = (TerrainResolution - 1) * (TerrainResolution - 1) * 6;
+            Vector3[] vertices = new Vector3[vertexCount];
+            Vector2[] uvs = new Vector2[vertexCount];
+            int[] triangles = new int[triangleIndexCount];
+            for (int z = 0; z < TerrainResolution; z++)
+            for (int x = 0; x < TerrainResolution; x++)
+            {
+                int index = z * TerrainResolution + x;
+                float worldX = -PathDrawerTerrainProfile.HalfExtent + 2f * PathDrawerTerrainProfile.HalfExtent * x / (TerrainResolution - 1f);
+                float worldZ = -PathDrawerTerrainProfile.HalfExtent + 2f * PathDrawerTerrainProfile.HalfExtent * z / (TerrainResolution - 1f);
+                float height = PathDrawerTerrainProfile.EvaluateHeight(worldX, worldZ);
+                vertices[index] = new Vector3(worldX, height, worldZ);
+                uvs[index] = new Vector2((worldX + PathDrawerTerrainProfile.HalfExtent) / 24f, (worldZ + PathDrawerTerrainProfile.HalfExtent) / 24f);
+            }
 
-            GameObject plateau = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            plateau.name = "Elevated Tactical Plateau — 1.2m";
-            plateau.transform.position = new Vector3(-1.2f, PlateauTop - 0.16f, -0.1f);
-            plateau.transform.localScale = new Vector3(7f, 0.32f, 5.8f);
-            plateau.GetComponent<MeshRenderer>().sharedMaterial = material;
+            int triangle = 0;
+            for (int z = 0; z < TerrainResolution - 1; z++)
+            for (int x = 0; x < TerrainResolution - 1; x++)
+            {
+                int a = z * TerrainResolution + x;
+                int b = a + TerrainResolution;
+                int c = a + 1;
+                int d = b + 1;
+                triangles[triangle++] = a;
+                triangles[triangle++] = b;
+                triangles[triangle++] = c;
+                triangles[triangle++] = c;
+                triangles[triangle++] = b;
+                triangles[triangle++] = d;
+            }
 
-            CreateRamp("Entry Ramp — cardinal X ascent", new Vector3(-9.5f, TerrainTop, -0.1f), new Vector3(-4.7f, PlateauTop, -0.1f), 6.2f, material);
-            CreateRamp("Exit Ramp — cardinal X descent", new Vector3(7.5f, TerrainTop, -0.1f), new Vector3(2.3f, PlateauTop, -0.1f), 6.2f, material);
-        }
+            string meshPath = $"{GeneratedFolder}/SmoothSlateTerrain.asset";
+            Mesh terrainMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            if (terrainMesh == null)
+            {
+                terrainMesh = new Mesh { name = "PathDrawer 80x80 Smooth Slate Terrain" };
+                AssetDatabase.CreateAsset(terrainMesh, meshPath);
+            }
+            else terrainMesh.Clear();
+            terrainMesh.indexFormat = IndexFormat.UInt32;
+            terrainMesh.vertices = vertices;
+            terrainMesh.uv = uvs;
+            terrainMesh.triangles = triangles;
+            terrainMesh.RecalculateNormals();
+            terrainMesh.RecalculateBounds();
+            EditorUtility.SetDirty(terrainMesh);
 
-        private static void CreateRamp(string name, Vector3 groundEndpoint, Vector3 plateauEndpoint, float width, Material material)
-        {
-            const float thickness = 0.32f;
-            Vector3 horizontal = new Vector3(plateauEndpoint.x - groundEndpoint.x, 0f, plateauEndpoint.z - groundEndpoint.z);
-            float horizontalLength = horizontal.magnitude;
-            if (horizontalLength <= 0.001f) throw new ArgumentException("Ramp endpoints must be separated on the X/Z plane.", nameof(plateauEndpoint));
-            if (Mathf.Abs(horizontal.x) > 0.001f && Mathf.Abs(horizontal.z) > 0.001f)
-                throw new ArgumentException("Portfolio ramps must follow a cardinal X or Z axis.", nameof(plateauEndpoint));
-
-            Vector3 forward = horizontal / horizontalLength;
-            float rise = plateauEndpoint.y - groundEndpoint.y;
-            float pitch = Mathf.Atan2(rise, horizontalLength);
-            float length = Mathf.Sqrt(horizontalLength * horizontalLength + rise * rise);
-            Quaternion yaw = Quaternion.LookRotation(forward, Vector3.up);
-            Quaternion rotation = yaw * Quaternion.AngleAxis(-pitch * Mathf.Rad2Deg, Vector3.right);
-            float halfThickness = thickness * 0.5f;
-            Vector3 midpoint = (groundEndpoint + plateauEndpoint) * 0.5f;
-            Vector3 center = midpoint
-                - Vector3.up * (halfThickness * Mathf.Cos(pitch))
-                + forward * (halfThickness * Mathf.Sin(pitch));
-
-            GameObject ramp = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            ramp.name = name;
-            ramp.transform.position = center;
-            ramp.transform.rotation = rotation;
-            ramp.transform.localScale = new Vector3(width, thickness, length);
-            ramp.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var terrain = new GameObject("Smooth Slate Terrain — 24m · 80 × 80", typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider));
+            terrain.GetComponent<MeshFilter>().sharedMesh = terrainMesh;
+            terrain.GetComponent<MeshRenderer>().sharedMaterial = material;
+            terrain.GetComponent<MeshCollider>().sharedMesh = terrainMesh;
         }
 
         private static void CreateObstacleMonolith(string name, Vector3 basePosition, int layer, Material bodyMaterial, Material bandMaterial)
         {
             const float height = 2.6f;
-            const float width = 0.92f;
-            GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             body.name = name;
             body.layer = layer;
             body.transform.position = basePosition + Vector3.up * (height * 0.5f);
-            body.transform.localScale = new Vector3(width, height, width);
+            body.transform.localScale = new Vector3(0.92f, height * 0.5f, 0.92f);
             body.GetComponent<MeshRenderer>().sharedMaterial = bodyMaterial;
 
-            CreateHazardBand(name + " / lower hazard rim", basePosition + Vector3.up * 0.43f, width + 0.075f, bandMaterial);
-            CreateHazardBand(name + " / upper hazard rim", basePosition + Vector3.up * 2.2f, width + 0.075f, bandMaterial);
+            CreateHazardBand(name + " / amber lower rim", basePosition + Vector3.up * 0.48f, bandMaterial);
+            CreateHazardBand(name + " / amber upper rim", basePosition + Vector3.up * 2.2f, bandMaterial);
         }
 
-        private static void CreateHazardBand(string name, Vector3 center, float width, Material material)
+        private static Vector3 TerrainBasePosition(float x, float z) =>
+            new(x, PathDrawerTerrainProfile.EvaluateHeight(x, z), z);
+
+        private static void CreateHazardBand(string name, Vector3 center, Material material)
         {
-            GameObject band = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject band = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             band.name = name;
             band.transform.position = center;
-            band.transform.localScale = new Vector3(width, 0.095f, width);
+            band.transform.localScale = new Vector3(1.02f, 0.05f, 1.02f);
             band.GetComponent<MeshRenderer>().sharedMaterial = material;
             UnityEngine.Object.DestroyImmediate(band.GetComponent<Collider>());
         }
@@ -343,21 +394,29 @@ namespace PathDrawer.Editor
             lightObject.transform.rotation = Quaternion.Euler(48f, -32f, 0f);
             Light key = lightObject.GetComponent<Light>();
             key.type = LightType.Directional;
-            key.intensity = 1.25f;
-            key.color = new Color(0.73f, 0.84f, 1f);
+            key.intensity = 1.15f;
+            key.color = new Color(0.91f, 0.94f, 1f);
+            key.shadows = LightShadows.Soft;
+            key.shadowStrength = 0.65f;
+            key.shadowResolution = LightShadowResolution.VeryHigh;
+            RenderSettings.ambientMode = AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.30f, 0.35f, 0.42f);
+            RenderSettings.ambientEquatorColor = new Color(0.18f, 0.21f, 0.25f);
+            RenderSettings.ambientGroundColor = new Color(0.075f, 0.09f, 0.11f);
+            RenderSettings.ambientIntensity = 0.8f;
 
             var cameraObject = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener), typeof(UniversalAdditionalCameraData));
             cameraObject.tag = "MainCamera";
-            cameraObject.transform.position = new Vector3(0f, 11.5f, -14.5f);
-            cameraObject.transform.LookAt(new Vector3(0f, 0.75f, 0f));
+            cameraObject.transform.position = new Vector3(0f, 17f, -21f);
+            cameraObject.transform.LookAt(new Vector3(0f, 0.55f, 0f));
             camera = cameraObject.GetComponent<Camera>();
             camera.orthographic = false;
-            camera.fieldOfView = 40f;
+            camera.fieldOfView = 42f;
             camera.aspect = 16f / 9f;
             camera.nearClipPlane = 0.1f;
             camera.farClipPlane = 100f;
             camera.allowHDR = true;
-            camera.backgroundColor = new Color(0.027f, 0.039f, 0.071f, 1f);
+            camera.backgroundColor = new Color32(22, 28, 36, 255);
             camera.clearFlags = CameraClearFlags.SolidColor;
             UniversalAdditionalCameraData cameraData = cameraObject.GetComponent<UniversalAdditionalCameraData>();
             cameraData.renderPostProcessing = true;
@@ -376,9 +435,9 @@ namespace PathDrawer.Editor
             }
             profile.components.Clear();
             Bloom bloom = profile.Add<Bloom>(true);
-            bloom.threshold.value = 0.9f;
-            bloom.intensity.value = 0.95f;
-            bloom.scatter.value = 0.65f;
+            bloom.threshold.value = 1.1f;
+            bloom.intensity.value = 0.25f;
+            bloom.scatter.value = 0.35f;
             Tonemapping tone = profile.Add<Tonemapping>(true);
             tone.mode.value = TonemappingMode.ACES;
             var volumeObject = new GameObject("Global Volume — Bloom + ACES", typeof(Volume));
@@ -422,9 +481,25 @@ namespace PathDrawer.Editor
             for (int i = 0; i < markers.Length; i++)
             {
                 GameObject marker = CreateRingObject($"RDP Waypoint {i + 1:00}", ringMesh, material);
-                marker.transform.localScale = Vector3.one * 0.95f;
+                marker.transform.localScale = Vector3.one * 1.05f;
                 marker.SetActive(false);
                 markers[i] = marker.transform;
+            }
+            return markers;
+        }
+
+        private static Transform[] CreateBallisticTicks(Material material, int count)
+        {
+            var markers = new Transform[count];
+            for (int i = 0; i < markers.Length; i++)
+            {
+                GameObject tick = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                tick.name = $"Ballistic Flight Tick {i + 1:00}";
+                tick.transform.localScale = Vector3.one * 0.09f;
+                tick.GetComponent<MeshRenderer>().sharedMaterial = material;
+                UnityEngine.Object.DestroyImmediate(tick.GetComponent<Collider>());
+                tick.SetActive(false);
+                markers[i] = tick.transform;
             }
             return markers;
         }
@@ -442,39 +517,27 @@ namespace PathDrawer.Editor
 
         private static Text CreateTelemetryHud(Camera camera)
         {
-            var eventSystemObject = new GameObject("EventSystem", typeof(EventSystem));
-            InputSystemUIInputModule inputModule = eventSystemObject.AddComponent<InputSystemUIInputModule>();
-            inputModule.AssignDefaultActions();
-
             var canvasObject = new GameObject("PathDrawer Telemetry HUD", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             Canvas canvas = canvasObject.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceCamera;
             canvas.worldCamera = camera;
             canvas.planeDistance = 0.7f;
             canvas.sortingOrder = 10;
+            canvas.enabled = false;
             CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
             scaler.matchWidthOrHeight = 0.5f;
 
-            var border = new GameObject("Telemetry Border", typeof(RectTransform), typeof(Image));
-            border.transform.SetParent(canvasObject.transform, false);
-            RectTransform borderRect = border.GetComponent<RectTransform>();
-            borderRect.anchorMin = new Vector2(0f, 1f);
-            borderRect.anchorMax = new Vector2(0f, 1f);
-            borderRect.pivot = new Vector2(0f, 1f);
-            borderRect.anchoredPosition = new Vector2(14f, -14f);
-            borderRect.sizeDelta = new Vector2(520f, 144f);
-            border.GetComponent<Image>().color = new Color(0.169f, 0.357f, 0.518f, 0.96f);
-
-            var panel = new GameObject("Telemetry Panel", typeof(RectTransform), typeof(Image));
-            panel.transform.SetParent(border.transform, false);
+            var panel = new GameObject("HUD Panel", typeof(RectTransform), typeof(Image));
+            panel.transform.SetParent(canvasObject.transform, false);
             RectTransform panelRect = panel.GetComponent<RectTransform>();
-            panelRect.anchorMin = Vector2.zero;
-            panelRect.anchorMax = Vector2.one;
-            panelRect.offsetMin = Vector2.one;
-            panelRect.offsetMax = Vector2.one * -1f;
-            panel.GetComponent<Image>().color = new Color(0.031f, 0.047f, 0.078f, 0.91f);
+            panelRect.anchorMin = new Vector2(0f, 1f);
+            panelRect.anchorMax = new Vector2(0f, 1f);
+            panelRect.pivot = new Vector2(0f, 1f);
+            panelRect.anchoredPosition = new Vector2(14f, -14f);
+            panelRect.sizeDelta = new Vector2(380f, 168f);
+            panel.GetComponent<Image>().color = new Color32(26, 34, 44, 244);
 
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             var titleObject = new GameObject("HUD Title", typeof(RectTransform), typeof(Text));
@@ -484,13 +547,13 @@ namespace PathDrawer.Editor
             titleRect.anchorMax = new Vector2(1f, 1f);
             titleRect.pivot = new Vector2(0f, 1f);
             titleRect.anchoredPosition = new Vector2(10f, -7f);
-            titleRect.sizeDelta = new Vector2(-20f, 20f);
+            titleRect.sizeDelta = new Vector2(-20f, 19f);
             Text title = titleObject.GetComponent<Text>();
             title.font = font;
-            title.fontSize = 14;
+            title.fontSize = 13;
             title.fontStyle = FontStyle.Bold;
             title.text = "PATHDRAWER  |  UNITY 6  •  BURST + JOBS";
-            title.color = new Color(0.56f, 0.88f, 1f, 1f);
+            title.color = new Color32(172, 226, 232, 255);
             title.raycastTarget = false;
             title.horizontalOverflow = HorizontalWrapMode.Overflow;
 
@@ -499,19 +562,52 @@ namespace PathDrawer.Editor
             RectTransform detailRect = detailObject.GetComponent<RectTransform>();
             detailRect.anchorMin = new Vector2(0f, 0f);
             detailRect.anchorMax = new Vector2(1f, 1f);
-            detailRect.offsetMin = new Vector2(12f, 8f);
-            detailRect.offsetMax = new Vector2(-12f, -30f);
+            detailRect.offsetMin = new Vector2(10f, 50f);
+            detailRect.offsetMax = new Vector2(-10f, -30f);
             Text detail = detailObject.GetComponent<Text>();
             detail.font = font;
             detail.fontSize = 12;
-            detail.lineSpacing = 1.05f;
+            detail.lineSpacing = 1f;
             detail.alignment = TextAnchor.UpperLeft;
             detail.supportRichText = true;
             detail.horizontalOverflow = HorizontalWrapMode.Overflow;
             detail.verticalOverflow = VerticalWrapMode.Truncate;
-            detail.color = new Color(0.78f, 0.87f, 0.96f, 1f);
+            detail.color = new Color32(218, 226, 233, 255);
             detail.raycastTarget = false;
+            CreateHudButtonVisual(panel.transform, font, "Spline Mode", 10f, -112f);
+            CreateHudButtonVisual(panel.transform, font, "Ballistic Mode", 196f, -112f);
+            CreateHudButtonVisual(panel.transform, font, "Arc Preview: ON", 10f, -136f);
+            CreateHudButtonVisual(panel.transform, font, "Auto-Showcase: ON", 196f, -136f);
             return detail;
+        }
+
+        private static void CreateHudButtonVisual(Transform parent, Font font, string label, float x, float y)
+        {
+            var button = new GameObject($"HUD Button Visual — {label}", typeof(RectTransform), typeof(Image));
+            button.transform.SetParent(parent, false);
+            RectTransform rect = button.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 1f);
+            rect.anchoredPosition = new Vector2(x, y);
+            rect.sizeDelta = new Vector2(174f, 19f);
+            button.GetComponent<Image>().color = new Color32(39, 53, 65, 255);
+
+            var textObject = new GameObject("Label", typeof(RectTransform), typeof(Text));
+            textObject.transform.SetParent(button.transform, false);
+            RectTransform textRect = textObject.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+            Text text = textObject.GetComponent<Text>();
+            text.font = font;
+            text.fontSize = 11;
+            text.fontStyle = FontStyle.Bold;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.color = new Color32(218, 226, 233, 255);
+            text.text = label;
+            text.raycastTarget = false;
         }
 
         private static Mesh CreateRingMeshAsset()
@@ -572,6 +668,7 @@ namespace PathDrawer.Editor
             if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
             if (material.HasProperty("_Color")) material.SetColor("_Color", color);
             if (material.HasProperty("_HDRColor")) material.SetColor("_HDRColor", color);
+            if (material.HasProperty("_Opacity")) material.SetFloat("_Opacity", color.a);
             EditorUtility.SetDirty(material);
             return material;
         }

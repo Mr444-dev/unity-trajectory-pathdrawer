@@ -2,20 +2,21 @@ Shader "PathDrawer/TrajectoryRibbonHologram"
 {
     Properties
     {
-        [HDR] _HDRColor ("Hologram Emission", Color) = (0.02, 2.2, 2.3, 1)
+        _BaseColor ("Ribbon Teal", Color) = (0.051, 0.58, 0.54, 0.82)
+        _ChevronColor ("Directional Chevrons", Color) = (0.20, 0.77, 0.69, 1)
+        _EdgeColor ("Thin Edge Borders", Color) = (0.025, 0.18, 0.17, 1)
+        _Opacity ("Opacity", Range(0, 1)) = 0.82
         _ChevronsPerMeter ("Chevron Repeat per Meter", Float) = 0.72
-        _ScrollSpeed ("Chevron Scroll Speed", Float) = 0.32
-        _EdgeGlow ("Edge Glow", Range(0, 2)) = 0.85
-        _Opacity ("Opacity", Range(0, 1)) = 0.9
+        _ScrollSpeed ("Chevron Scroll Speed", Float) = 0.22
     }
     SubShader
     {
         Tags { "RenderPipeline"="UniversalPipeline" "RenderType"="Transparent" "Queue"="Transparent" }
         Pass
         {
-            Name "AdditiveHologram"
+            Name "TealDirectionalRibbon"
             Tags { "LightMode"="UniversalForward" }
-            Blend SrcAlpha One
+            Blend SrcAlpha OneMinusSrcAlpha
             ZWrite Off
             Cull Off
 
@@ -26,18 +27,18 @@ Shader "PathDrawer/TrajectoryRibbonHologram"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
-                float4 _HDRColor;
+                float4 _BaseColor;
+                float4 _ChevronColor;
+                float4 _EdgeColor;
+                float _Opacity;
                 float _ChevronsPerMeter;
                 float _ScrollSpeed;
-                float _EdgeGlow;
-                float _Opacity;
             CBUFFER_END
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
-                float4 tangentOS : TANGENT;
                 float2 uv : TEXCOORD0;
             };
 
@@ -45,17 +46,12 @@ Shader "PathDrawer/TrajectoryRibbonHologram"
             {
                 float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
-                float3 normalWS : TEXCOORD1;
-                float3 positionWS : TEXCOORD2;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                VertexPositionInputs position = GetVertexPositionInputs(input.positionOS.xyz);
-                output.positionCS = position.positionCS;
-                output.positionWS = position.positionWS;
-                output.normalWS = TransformObjectToWorldNormal(input.normalOS);
+                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.uv = input.uv;
                 return output;
             }
@@ -69,20 +65,17 @@ Shader "PathDrawer/TrajectoryRibbonHologram"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                float2 uv = input.uv;
-                float2 pattern = float2(frac(uv.x * max(_ChevronsPerMeter, 0.01) - _Time.y * _ScrollSpeed), saturate(uv.y));
-                float d1 = DistanceToSegment(pattern, float2(0.15, 0.16), float2(0.83, 0.50));
-                float d2 = DistanceToSegment(pattern, float2(0.83, 0.50), float2(0.15, 0.84));
-                float chevron = 1.0 - smoothstep(0.025, 0.055, min(d1, d2));
+                float2 pattern = float2(frac(input.uv.x * max(_ChevronsPerMeter, 0.01) - _Time.y * _ScrollSpeed), input.uv.y);
+                float d1 = DistanceToSegment(pattern, float2(0.18, 0.18), float2(0.74, 0.5));
+                float d2 = DistanceToSegment(pattern, float2(0.74, 0.5), float2(0.18, 0.82));
+                float chevron = 1.0 - smoothstep(0.025, 0.052, min(d1, d2));
+                float edgeDistance = min(input.uv.y, 1.0 - input.uv.y);
+                float edge = 1.0 - smoothstep(0.012, 0.04, edgeDistance);
 
-                float meterPhase = frac(uv.x);
-                float tickDistance = min(meterPhase, 1.0 - meterPhase);
-                float tick = (1.0 - smoothstep(0.012, 0.04, tickDistance)) * smoothstep(0.03, 0.18, uv.y) * (1.0 - smoothstep(0.82, 0.97, uv.y));
-                float edge = 1.0 - smoothstep(0.37, 0.5, abs(uv.y - 0.5));
-                float fresnel = pow(1.0 - saturate(abs(normalize(input.normalWS).y)), 2.0);
-                float scan = 0.84 + 0.16 * sin((uv.x + _Time.y * 0.12) * 6.28318);
-                float intensity = (0.22 + edge * _EdgeGlow + chevron * 1.2 + tick * 0.9 + fresnel * 0.3) * scan;
-                return half4(_HDRColor.rgb * intensity, _Opacity * (0.55 + edge * 0.35 + chevron * 0.1));
+                float3 color = lerp(_BaseColor.rgb, _ChevronColor.rgb, chevron * 0.82);
+                color = lerp(color, _EdgeColor.rgb, edge * 0.9);
+                float alpha = min(_Opacity, _BaseColor.a) * (0.86 + chevron * 0.12 + edge * 0.05);
+                return half4(color, saturate(alpha));
             }
             ENDHLSL
         }
