@@ -67,6 +67,6 @@ Run **Window → General → Test Runner → EditMode → Run All**. The Unity E
 | **3. Capture 1080p Portfolio Screenshot** | `docs/screenshots/pathdrawer-game-view.png`, with content assertions before saving. |
 | **4. Build WebGL for itch.io (ZIP)** | `Builds/WebGL-ItchIo/` and a ZIP whose root contains `index.html`. |
 
-## License
+## Copyright and reuse
 
-Original project code by Michał Rusinek (Mr444-dev) is licensed under MIT. See [LICENSE](LICENSE).
+Original project code by Michał Rusinek (Mr444-dev) is not offered under an open-source license; all rights are reserved. See [LICENSE](LICENSE).
