@@ -1,5 +1,7 @@
 # PathDrawer
 
+[![MIT License](https://img.shields.io/badge/C%23%20source-MIT-green.svg)](LICENSE)
+
 **A Unity 6 path input, spline, and trajectory engine.** Convert a pointer trace into a simplified path, distance-spaced spline or ballistic arc, terrain projection, blocker result, and a Burst-generated ribbon. Runtime buffers are preallocated; the warmed geometry and full frame-loop EditMode probes report **0 B managed GC**.
 
 ![PathDrawer playable trajectory showcase](docs/screenshots/pathdrawer-game-view.png)
@@ -69,4 +71,4 @@ Run **Window → General → Test Runner → EditMode → Run All**. The Unity E
 
 ## Copyright and reuse
 
-Original project code by Michał Rusinek (Mr444-dev) is not offered under an open-source license; all rights are reserved. See [LICENSE](LICENSE).
+The original C# runtime, editor, and test source listed in [LICENSE](LICENSE) is available under the MIT License. This grant covers code only; the sample scene, generated project assets, screenshots, documentation, Unity materials, and third-party packages remain under separate terms. See [COPYRIGHT.md](COPYRIGHT.md) and the notices included with third-party components.
