@@ -69,4 +69,4 @@ Run **Window → General → Test Runner → EditMode → Run All**. The Unity E
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+Original project code by Michał Rusinek (Mr444-dev) is licensed under MIT. See [LICENSE](LICENSE).
